@@ -6,6 +6,8 @@ class Card(BaseModel):
     mana_cost: str | None = None
     type_line: str
     oracle_text: str | None = None
+    power: str | None = None
+    toughness: str | None = None
     colors: list[str] = []
     keywords: list[str] = []
     legalities: dict[str, str] = {}

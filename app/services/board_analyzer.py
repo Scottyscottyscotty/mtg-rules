@@ -31,6 +31,7 @@ from app.models.board import (
     PlayerState,
     ReplacementEffect,
 )
+from app.models.card import Card
 from app.services.scryfall import fetch_card
 
 BOARD_ANALYSIS_SYSTEM = """\
@@ -44,11 +45,18 @@ You have perfect knowledge of the comprehensive rules, including:
 - Continuous effects and the layer system (rule 613)
 - How sacrifice works (the permanent dies after being sacrificed)
 
+CRITICAL: You are provided with EXACT card data from Scryfall (the official MTG database). \
+Use ONLY the provided card stats (name, type, oracle text, power/toughness, mana cost). \
+Do NOT rely on your memory for card details — your training data may have incorrect or \
+outdated card information. If a card's data is not provided, say so in warnings rather \
+than guessing.
+
 You must trace through the COMPLETE chain of events, including:
 - Effects that cause state-based actions (e.g., -2/-2 killing creatures)
 - Triggers that fire from those state-based actions
 - Cascading triggers (triggers causing more triggers)
 - Which player controls each trigger for APNAP ordering
+- Use the ACTUAL power/toughness values provided to determine what dies
 
 Be thorough. Walk through every single thing that happens in order.\
 """
@@ -65,9 +73,13 @@ step by step, including state-based actions, cascading triggers, and APNAP order
 
 {event_description}
 
-## Card Oracle Text (from Scryfall)
+## Card Data (from Scryfall — the ONLY source of truth for card stats)
 
 {card_texts}
+
+IMPORTANT: The card data above is fetched LIVE from Scryfall and is authoritative. \
+Use ONLY these stats (power/toughness, oracle text, type line) for your analysis. \
+Do NOT use any card information from your training data — it may be wrong.
 
 ## Instructions
 
@@ -145,13 +157,13 @@ async def analyze_board_event(request: BoardAnalysisRequest) -> BoardAnalysisRes
             "Set it in your .env file to use the board analyzer."
         )
 
-    # Fetch oracle text for all permanents on the board
-    card_texts = await _fetch_all_card_texts(board, warnings)
+    # Fetch full card data for all permanents on the board
+    card_data = await _fetch_all_cards(board, warnings)
 
     # Build the prompt
     board_desc = _describe_board(board)
     event_desc = _describe_event(event)
-    cards_desc = _describe_card_texts(card_texts)
+    cards_desc = _describe_cards(card_data)
 
     prompt = ANALYSIS_PROMPT_TEMPLATE.format(
         board_description=board_desc,
@@ -235,35 +247,51 @@ def _describe_event(event: GameEvent) -> str:
     return "\n".join(parts)
 
 
-def _describe_card_texts(card_texts: dict[str, str]) -> str:
-    """Format card oracle texts for the prompt."""
-    if not card_texts:
-        return "(No card texts were retrieved — Scryfall lookups may have failed)"
+def _describe_cards(card_data: dict[str, Card]) -> str:
+    """Format full card data for the prompt — type, P/T, oracle text, everything."""
+    if not card_data:
+        return "(No card data was retrieved — Scryfall lookups may have failed)"
 
     lines = []
-    for name, oracle in card_texts.items():
-        lines.append(f"**{name}**:")
-        lines.append(f"  {oracle}")
+    for name, card in card_data.items():
+        lines.append(f"**{card.name}** (looked up as: {name})")
+        if card.mana_cost:
+            lines.append(f"  Mana cost: {card.mana_cost}")
+        lines.append(f"  Type: {card.type_line}")
+        if card.oracle_text:
+            lines.append(f"  Oracle text: {card.oracle_text}")
+        if card.power is not None and card.toughness is not None:
+            lines.append(f"  Power/Toughness: {card.power}/{card.toughness}")
+        if card.keywords:
+            lines.append(f"  Keywords: {', '.join(card.keywords)}")
         lines.append("")
     return "\n".join(lines)
 
 
-async def _fetch_all_card_texts(
+async def _fetch_all_cards(
     board: BoardState, warnings: list[str]
-) -> dict[str, str]:
-    """Fetch oracle text for every unique card on the board."""
+) -> dict[str, Card]:
+    """Fetch full card data for every unique card on the board, concurrently."""
     card_names = set()
     for player in board.players:
         for permanent in player.permanents:
             card_names.add(permanent.card_name)
 
-    texts: dict[str, str] = {}
-    for i, name in enumerate(card_names):
-        if i > 0:
-            await asyncio.sleep(0.1)  # Scryfall rate limit: 50-100ms between requests
+    # Fetch all cards concurrently (Scryfall cache handles rate limiting
+    # for already-cached cards; new cards go through fetch_card which
+    # hits the API one at a time)
+    async def _fetch_one(name: str) -> tuple[str, Card | None]:
         card = await fetch_card(name)
+        return name, card
+
+    results = await asyncio.gather(
+        *[_fetch_one(name) for name in card_names]
+    )
+
+    cards: dict[str, Card] = {}
+    for name, card in results:
         if card and card.oracle_text:
-            texts[name] = card.oracle_text
+            cards[name] = card
         elif card and not card.oracle_text:
             warnings.append(
                 f"Card '{name}' was found but has no oracle text "
@@ -275,12 +303,12 @@ async def _fetch_all_card_texts(
                 f"Check the spelling — this card's abilities will be ignored."
             )
 
-    if not texts:
+    if not cards:
         warnings.append(
-            "No card oracle text was retrieved for ANY card on the board. "
-            "The analyzer cannot detect triggers without oracle text."
+            "No card data was retrieved for ANY card on the board. "
+            "The analyzer cannot detect triggers without card data."
         )
-    return texts
+    return cards
 
 
 def _parse_analysis_response(
