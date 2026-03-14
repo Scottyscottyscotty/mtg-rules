@@ -27,6 +27,8 @@ from app.services.event_detector import (
     detect_static_modifications,
     detect_triggers,
 )
+import asyncio
+
 from app.services.scryfall import fetch_card
 
 # Safety limit to prevent infinite loops
@@ -39,7 +41,7 @@ async def analyze_board_event(request: BoardAnalysisRequest) -> BoardAnalysisRes
     event = request.event
 
     # Fetch oracle text for all permanents on the board
-    card_texts = await _fetch_all_card_texts(board)
+    card_texts = await _fetch_all_card_texts(board, warnings)
 
     # Resolve the cascade
     cascade: list[CascadeStep] = []
@@ -169,7 +171,9 @@ async def analyze_board_event(request: BoardAnalysisRequest) -> BoardAnalysisRes
     )
 
 
-async def _fetch_all_card_texts(board: BoardState) -> dict[str, str]:
+async def _fetch_all_card_texts(
+    board: BoardState, warnings: list[str]
+) -> dict[str, str]:
     """Fetch oracle text for every unique card on the board."""
     card_names = set()
     for player in board.players:
@@ -177,10 +181,28 @@ async def _fetch_all_card_texts(board: BoardState) -> dict[str, str]:
             card_names.add(permanent.card_name)
 
     texts: dict[str, str] = {}
-    for name in card_names:
+    for i, name in enumerate(card_names):
+        if i > 0:
+            await asyncio.sleep(0.1)  # Scryfall rate limit: 50-100ms between requests
         card = await fetch_card(name)
         if card and card.oracle_text:
             texts[name] = card.oracle_text
+        elif card and not card.oracle_text:
+            warnings.append(
+                f"Card '{name}' was found but has no oracle text "
+                f"(land or token?). It won't trigger anything."
+            )
+        else:
+            warnings.append(
+                f"Could not find card '{name}' on Scryfall. "
+                f"Check the spelling — this card's abilities will be ignored."
+            )
+
+    if not texts:
+        warnings.append(
+            "No card oracle text was retrieved for ANY card on the board. "
+            "The analyzer cannot detect triggers without oracle text."
+        )
     return texts
 
 

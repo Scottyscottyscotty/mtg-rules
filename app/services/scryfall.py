@@ -2,9 +2,12 @@
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from app.models.card import Card
 
@@ -33,7 +36,11 @@ async def fetch_card(name: str) -> Card | None:
             timeout=10.0,
         )
         if resp.status_code != 200:
+            logger.warning(
+                "Scryfall lookup failed for '%s': HTTP %d", name, resp.status_code
+            )
             return None
+        logger.info("Scryfall found card: '%s'", name)
         data = resp.json()
         cached.write_text(json.dumps(data))
 
