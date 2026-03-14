@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MTG Rules Engine</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>MTG <span>Rules Engine</span></h1>
+    </header>
+
+    <main>
+        <div class="tabs">
+            <button class="tab active" data-panel="interactions">Interactions</button>
+            <button class="tab" data-panel="cards">Card Search</button>
+            <button class="tab" data-panel="rules">Rules Lookup</button>
+        </div>
+
+        <!-- Interactions Panel -->
+        <div id="interactions" class="panel active">
+            <div class="interaction-input">
+                <h2>Analyze Card Interactions</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;">
+                    Add 2-6 cards to see how they interact: stack behavior, layer effects,
+                    replacement effects, keyword combos, and relevant rulings.
+                </p>
+                <div class="search-box">
+                    <input type="text" id="interaction-card-input"
+                           placeholder="Type a card name and press Enter or Add...">
+                    <button id="add-card-btn">Add</button>
+                </div>
+                <div id="card-tags" class="card-tags"></div>
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;">
+                    <select id="format-select" class="format-select">
+                        <option value="all">All Formats</option>
+                        <option value="standard">Standard</option>
+                        <option value="modern">Modern</option>
+                        <option value="legacy">Legacy</option>
+                        <option value="vintage">Vintage</option>
+                        <option value="commander">Commander</option>
+                        <option value="pioneer">Pioneer</option>
+                        <option value="pauper">Pauper</option>
+                    </select>
+                    <button id="analyze-btn" disabled>Analyze Interaction</button>
+                </div>
+            </div>
+            <div id="interaction-results"></div>
+        </div>
+
+        <!-- Card Search Panel -->
+        <div id="cards" class="panel">
+            <div class="search-box">
+                <input type="text" id="card-search"
+                       placeholder="Search cards (e.g. 'lightning bolt', 'c:blue t:instant')">
+                <button id="card-search-btn">Search</button>
+            </div>
+            <div id="card-results" class="card-grid"></div>
+        </div>
+
+        <!-- Rules Lookup Panel -->
+        <div id="rules" class="panel">
+            <div class="search-box">
+                <input type="text" id="rules-search"
+                       placeholder="Search rules (e.g. 'stack', 'trample', 'priority')">
+                <button id="rules-search-btn">Search</button>
+            </div>
+            <div id="rules-results"></div>
+        </div>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
