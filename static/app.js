@@ -6,6 +6,102 @@ const state = {
     players: [],   // [{name, life, permanents: [{card_name, tapped, notes}]}]
 };
 
+// --- Card Name Autocomplete ---
+let acDebounceTimer = null;
+let acActiveDropdown = null;
+
+function setupAutocomplete(input, onSelect) {
+    // Create dropdown
+    const wrapper = document.createElement('div');
+    wrapper.className = 'ac-wrapper';
+    input.parentNode.insertBefore(wrapper, input);
+    wrapper.appendChild(input);
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'ac-dropdown';
+    wrapper.appendChild(dropdown);
+
+    let selectedIdx = -1;
+
+    input.addEventListener('input', () => {
+        const q = input.value.trim();
+        clearTimeout(acDebounceTimer);
+        if (q.length < 2) {
+            dropdown.innerHTML = '';
+            dropdown.classList.remove('visible');
+            return;
+        }
+        acDebounceTimer = setTimeout(async () => {
+            try {
+                const resp = await fetch(`/api/cards/autocomplete?q=${encodeURIComponent(q)}`);
+                if (!resp.ok) return;
+                const names = await resp.json();
+                renderAcDropdown(dropdown, names, input, onSelect);
+                selectedIdx = -1;
+            } catch (_) {}
+        }, 150);
+    });
+
+    input.addEventListener('keydown', e => {
+        const items = dropdown.querySelectorAll('.ac-item');
+        if (!items.length) return;
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedIdx = Math.min(selectedIdx + 1, items.length - 1);
+            items.forEach((el, i) => el.classList.toggle('highlighted', i === selectedIdx));
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedIdx = Math.max(selectedIdx - 1, 0);
+            items.forEach((el, i) => el.classList.toggle('highlighted', i === selectedIdx));
+        } else if (e.key === 'Enter' && selectedIdx >= 0) {
+            e.preventDefault();
+            const name = items[selectedIdx].textContent;
+            input.value = name;
+            dropdown.innerHTML = '';
+            dropdown.classList.remove('visible');
+            selectedIdx = -1;
+            if (onSelect) onSelect(name);
+        } else if (e.key === 'Escape') {
+            dropdown.innerHTML = '';
+            dropdown.classList.remove('visible');
+            selectedIdx = -1;
+        }
+    });
+
+    // Close dropdown on outside click
+    document.addEventListener('click', e => {
+        if (!wrapper.contains(e.target)) {
+            dropdown.innerHTML = '';
+            dropdown.classList.remove('visible');
+        }
+    });
+
+    return wrapper;
+}
+
+function renderAcDropdown(dropdown, names, input, onSelect) {
+    if (!names.length) {
+        dropdown.innerHTML = '';
+        dropdown.classList.remove('visible');
+        return;
+    }
+    dropdown.innerHTML = names.slice(0, 8).map(name =>
+        `<div class="ac-item">${escapeHtml(name)}</div>`
+    ).join('');
+    dropdown.classList.add('visible');
+
+    dropdown.querySelectorAll('.ac-item').forEach(item => {
+        item.addEventListener('mousedown', e => {
+            e.preventDefault();
+            input.value = item.textContent;
+            dropdown.innerHTML = '';
+            dropdown.classList.remove('visible');
+            if (onSelect) onSelect(item.textContent);
+        });
+    });
+}
+
 // --- Tab switching ---
 document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -25,7 +121,7 @@ const cardResults = document.getElementById('card-results');
 async function searchCards(query) {
     cardResults.innerHTML = '<div class="loading"><span class="spinner"></span>Searching...</div>';
     try {
-        const resp = await fetch(`/api/cards/?q=${encodeURIComponent(query)}&limit=12`);
+        const resp = await fetch(`/api/cards/search?q=${encodeURIComponent(query)}&limit=12`);
         if (!resp.ok) throw new Error('Search failed');
         const cards = await resp.json();
         renderCardResults(cards);
@@ -279,11 +375,11 @@ function renderPlayers() {
             </div>
 
             <div style="margin-top: 0.75rem;">
-                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
-                    <input type="text" id="perm-input-${pi}" placeholder="Add permanent (card name)"
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;" class="perm-add-row">
+                    <input type="text" id="perm-input-${pi}" class="perm-ac-input" data-player="${pi}"
+                           placeholder="Add permanent (card name)"
                            style="flex: 1; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border);
-                                  border-radius: 6px; color: var(--text);"
-                           onkeydown="if(event.key==='Enter') addPermanent(${pi})">
+                                  border-radius: 6px; color: var(--text);">
                     <button onclick="addPermanent(${pi})" style="padding: 0.5rem 1rem; font-size: 0.85rem;">Add</button>
                 </div>
                 <div class="card-tags">
@@ -298,6 +394,15 @@ function renderPlayers() {
             </div>
         </div>
     `).join('');
+
+    // Attach autocomplete to each permanent input
+    document.querySelectorAll('.perm-ac-input').forEach(input => {
+        const pi = parseInt(input.dataset.player);
+        setupAutocomplete(input, (name) => {
+            // Auto-add on select
+            addPermanentByName(pi, name);
+        });
+    });
 }
 
 function updateLife(playerIdx, value) {
@@ -313,12 +418,15 @@ function addPermanent(playerIdx) {
     const input = document.getElementById(`perm-input-${playerIdx}`);
     const name = input.value.trim();
     if (!name) return;
+    addPermanentByName(playerIdx, name);
+}
+
+function addPermanentByName(playerIdx, name) {
     state.players[playerIdx].permanents.push({
         card_name: name,
         owner: state.players[playerIdx].name,
         tapped: false,
     });
-    input.value = '';
     renderPlayers();
 }
 
@@ -559,3 +667,7 @@ function formatMarkdown(text) {
 // Init
 renderCardTags();
 renderPlayers();
+
+// Set up autocomplete on static card inputs
+setupAutocomplete(interactionInput, null);
+setupAutocomplete(document.getElementById('event-source-card'), null);

@@ -58,6 +58,20 @@ async def _fetch_rulings(client: httpx.AsyncClient, card_id: str) -> list[str]:
     return [r["comment"] for r in data.get("data", [])]
 
 
+async def autocomplete_card(query: str) -> list[str]:
+    """Autocomplete card names using Scryfall's autocomplete endpoint."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{SCRYFALL_API}/cards/autocomplete",
+            params={"q": query},
+            timeout=5.0,
+        )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        return data.get("data", [])
+
+
 async def search_cards(query: str, limit: int = 10) -> list[Card]:
     """Search for cards matching a query string."""
     async with httpx.AsyncClient() as client:
