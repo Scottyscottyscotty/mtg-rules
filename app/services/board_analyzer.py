@@ -40,12 +40,12 @@ async def analyze_board_event(request: BoardAnalysisRequest) -> BoardAnalysisRes
     board = request.board
     event = request.event
 
-    # Fetch oracle text for all permanents on the board
-    card_texts = await _fetch_all_card_texts(board, warnings)
-
     # Resolve the cascade
     cascade: list[CascadeStep] = []
     warnings: list[str] = []
+
+    # Fetch oracle text for all permanents on the board
+    card_texts = await _fetch_all_card_texts(board, warnings)
     stack_order: list[str] = []
 
     # Determine APNAP order (Active Player, Non-Active Player)
