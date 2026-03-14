@@ -248,10 +248,20 @@ def _detect_produced_events(
     permanent: PermanentOnBoard,
     triggering_event: GameEvent,
 ) -> list[GameEvent]:
-    """Detect what events a triggered ability produces when it fires."""
+    """Detect what events a triggered ability produces when it fires.
+
+    Only scans the EFFECT portion of triggered abilities, not the
+    trigger condition. For "Whenever an opponent draws a card, this
+    deals 1 damage", we only look at "this deals 1 damage" — NOT
+    "draws a card" which is the condition, not the effect.
+    """
+    # Split trigger condition from effect.
+    # Triggered abilities follow: "When(ever) [condition], [effect]"
+    effect_text = _extract_effect_portion(oracle_lower)
+
     events = []
     for pattern, event_type in EFFECT_PATTERNS:
-        match = re.search(pattern, oracle_lower)
+        match = re.search(pattern, effect_text)
         if match:
             amount = None
             for group in match.groups():
@@ -267,6 +277,35 @@ def _detect_produced_events(
                 details=f"From {permanent.card_name}'s triggered ability",
             ))
     return events
+
+
+def _extract_effect_portion(oracle_lower: str) -> str:
+    """Extract only the effect portion of a triggered ability.
+
+    Given "whenever an opponent draws a card, this enchantment deals
+    1 damage to that player", returns "this enchantment deals 1 damage
+    to that player".
+
+    For non-triggered text or multiple abilities separated by newlines,
+    processes each line independently.
+    """
+    lines = oracle_lower.split("\n")
+    effect_parts = []
+    for line in lines:
+        line = line.strip()
+        # Check if this line is a triggered ability
+        trigger_match = re.match(
+            r"(?:when(?:ever)?|at the beginning of|at end of)\s+.+?,\s*",
+            line,
+        )
+        if trigger_match:
+            # Everything after the comma is the effect
+            effect_parts.append(line[trigger_match.end():])
+        else:
+            # Not a triggered ability line — include as-is
+            # (could be an activated ability or static text)
+            effect_parts.append(line)
+    return "\n".join(effect_parts)
 
 
 def _extract_ability_text(oracle_text: str, match_start: int) -> str:
