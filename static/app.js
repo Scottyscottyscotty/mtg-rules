@@ -435,6 +435,92 @@ function renderBoardResult(result) {
     boardResults.innerHTML = html;
 }
 
+// --- Rules Chat ---
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+const chatSendBtn = document.getElementById('chat-send-btn');
+const chatHistory = []; // {role, content} pairs for API
+
+function addChatMessage(role, content) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `chat-msg ${role}`;
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-bubble';
+    bubble.innerHTML = role === 'assistant' ? formatMarkdown(content) : escapeHtml(content);
+    msgDiv.appendChild(bubble);
+    chatMessages.appendChild(msgDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function addChatThinking() {
+    const el = document.createElement('div');
+    el.className = 'chat-msg assistant';
+    el.id = 'chat-thinking';
+    el.innerHTML = '<div class="chat-thinking"><span class="spinner"></span>Looking up rules...</div>';
+    chatMessages.appendChild(el);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function removeChatThinking() {
+    const el = document.getElementById('chat-thinking');
+    if (el) el.remove();
+}
+
+async function sendChatMessage() {
+    const question = chatInput.value.trim();
+    if (!question) return;
+
+    chatInput.value = '';
+    chatSendBtn.disabled = true;
+    addChatMessage('user', question);
+    addChatThinking();
+
+    try {
+        const resp = await fetch('/api/chat/ask', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question, history: chatHistory }),
+        });
+        removeChatThinking();
+
+        if (!resp.ok) {
+            const data = await resp.json();
+            throw new Error(data.detail || 'Chat request failed');
+        }
+
+        const result = await resp.json();
+        addChatMessage('assistant', result.answer);
+
+        // Update history for follow-ups
+        chatHistory.push({ role: 'user', content: question });
+        chatHistory.push({ role: 'assistant', content: result.answer });
+    } catch (err) {
+        removeChatThinking();
+        addChatMessage('assistant', `Error: ${err.message}`);
+    }
+
+    chatSendBtn.disabled = false;
+    chatInput.focus();
+}
+
+chatSendBtn.addEventListener('click', sendChatMessage);
+chatInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
+    }
+});
+
+function formatMarkdown(text) {
+    // Basic markdown: bold, italic, code, lists
+    let html = escapeHtml(text);
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    html = html.replace(/`(.+?)`/g, '<code style="background:rgba(255,255,255,0.1);padding:0.1rem 0.3rem;border-radius:3px;">$1</code>');
+    html = html.replace(/^- (.+)$/gm, '<li style="margin-left:1rem;">$1</li>');
+    return html;
+}
+
 // Init
 renderCardTags();
 renderPlayers();

@@ -13,14 +13,44 @@
 
     <main>
         <div class="tabs">
-            <button class="tab active" data-panel="board">Board State</button>
+            <button class="tab active" data-panel="chat">Rules Chat</button>
+            <button class="tab" data-panel="board">Board State</button>
             <button class="tab" data-panel="interactions">Interactions</button>
             <button class="tab" data-panel="cards">Card Search</button>
             <button class="tab" data-panel="rules">Rules Lookup</button>
         </div>
 
+        <!-- Rules Chat Panel -->
+        <div id="chat" class="panel active">
+            <div class="chat-container">
+                <div id="chat-messages" class="chat-messages">
+                    <div class="chat-msg assistant">
+                        <div class="chat-bubble">
+                            Ask me anything about Magic: The Gathering rules, card interactions,
+                            or how specific mechanics work. I'll look up the relevant rules and
+                            card data to give you an accurate answer.
+                            <br><br>
+                            Try things like:
+                            <ul style="margin: 0.5rem 0 0 1rem;">
+                                <li>"What does poison do?"</li>
+                                <li>"Can two legendary creatures with the same name be on the board?"</li>
+                                <li>"How does 'Rhystic Study' interact with 'Notion Thief'?"</li>
+                                <li>"What happens if I cast a spell while 'Possibility Storm' is out?"</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-input-area">
+                    <input type="text" id="chat-input"
+                           placeholder="Ask a rules question..."
+                           autocomplete="off">
+                    <button id="chat-send-btn">Send</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Board State Panel -->
-        <div id="board" class="panel active">
+        <div id="board" class="panel">
             <div class="interaction-input">
                 <h2>Board State Analyzer</h2>
                 <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;">
