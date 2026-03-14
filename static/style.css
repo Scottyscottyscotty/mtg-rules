@@ -314,6 +314,23 @@ button:disabled {
     color: var(--accent);
 }
 
+input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-inner-spin-button {
+    opacity: 1;
+}
+
+select option {
+    background: var(--bg-card);
+    color: var(--text);
+}
+
+.summary-box + .results-section {
+    margin-top: 1rem;
+}
+
 @media (max-width: 600px) {
     header { padding: 0.75rem 1rem; }
     main { padding: 0 0.5rem; margin: 1rem auto; }

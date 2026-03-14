@@ -2,7 +2,8 @@
 
 const state = {
     selectedCards: [],
-    currentTab: 'interactions',
+    currentTab: 'board',
+    players: [],   // [{name, life, permanents: [{card_name, tapped, notes}]}]
 };
 
 // --- Tab switching ---
@@ -227,5 +228,213 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
+// --- Board State Builder ---
+const addPlayerBtn = document.getElementById('add-player-btn');
+const playerNameInput = document.getElementById('player-name-input');
+const playersContainer = document.getElementById('players-container');
+const activePlayerSelect = document.getElementById('active-player-select');
+const eventSourcePlayer = document.getElementById('event-source-player');
+const runEventBtn = document.getElementById('run-event-btn');
+const boardResults = document.getElementById('board-results');
+
+addPlayerBtn.addEventListener('click', () => {
+    const name = playerNameInput.value.trim();
+    if (!name || state.players.find(p => p.name === name)) return;
+    state.players.push({ name, life: 40, permanents: [] });
+    playerNameInput.value = '';
+    renderPlayers();
+});
+playerNameInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') addPlayerBtn.click();
+});
+
+function renderPlayers() {
+    // Update player selects
+    const playerNames = state.players.map(p => p.name);
+    activePlayerSelect.innerHTML = '<option value="">-- select --</option>' +
+        playerNames.map(n => `<option value="${n}">${n}</option>`).join('');
+    eventSourcePlayer.innerHTML = '<option value="">Source player</option>' +
+        playerNames.map(n => `<option value="${n}">${n}</option>`).join('');
+
+    runEventBtn.disabled = state.players.length === 0;
+
+    // Render player boards
+    playersContainer.innerHTML = state.players.map((player, pi) => `
+        <div class="results-section" style="margin-bottom: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="border-bottom: none; padding-bottom: 0; margin-bottom: 0;">
+                    ${escapeHtml(player.name)}
+                    <span style="font-weight: 300; font-size: 0.85rem; color: var(--text-muted);">
+                        (Life:
+                        <input type="number" value="${player.life}" min="0"
+                               onchange="updateLife(${pi}, this.value)"
+                               style="width: 50px; background: var(--bg-input); border: 1px solid var(--border);
+                                      border-radius: 4px; color: var(--text); text-align: center; padding: 2px;">)
+                    </span>
+                </h2>
+                <button onclick="removePlayer(${pi})"
+                        style="background: transparent; color: var(--accent); font-size: 0.8rem; padding: 0.25rem 0.5rem;">
+                    Remove
+                </button>
+            </div>
+
+            <div style="margin-top: 0.75rem;">
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                    <input type="text" id="perm-input-${pi}" placeholder="Add permanent (card name)"
+                           style="flex: 1; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border);
+                                  border-radius: 6px; color: var(--text);"
+                           onkeydown="if(event.key==='Enter') addPermanent(${pi})">
+                    <button onclick="addPermanent(${pi})" style="padding: 0.5rem 1rem; font-size: 0.85rem;">Add</button>
+                </div>
+                <div class="card-tags">
+                    ${player.permanents.map((perm, ci) => `
+                        <span class="card-tag">
+                            ${escapeHtml(perm.card_name)}
+                            ${perm.tapped ? '<span style="color: var(--warning);">(T)</span>' : ''}
+                            <span class="remove" onclick="removePermanent(${pi}, ${ci})">x</span>
+                        </span>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function updateLife(playerIdx, value) {
+    state.players[playerIdx].life = parseInt(value) || 0;
+}
+
+function removePlayer(playerIdx) {
+    state.players.splice(playerIdx, 1);
+    renderPlayers();
+}
+
+function addPermanent(playerIdx) {
+    const input = document.getElementById(`perm-input-${playerIdx}`);
+    const name = input.value.trim();
+    if (!name) return;
+    state.players[playerIdx].permanents.push({
+        card_name: name,
+        owner: state.players[playerIdx].name,
+        tapped: false,
+    });
+    input.value = '';
+    renderPlayers();
+}
+
+function removePermanent(playerIdx, permIdx) {
+    state.players[playerIdx].permanents.splice(permIdx, 1);
+    renderPlayers();
+}
+
+runEventBtn.addEventListener('click', async () => {
+    const board = {
+        players: state.players.map(p => ({
+            name: p.name,
+            life: p.life,
+            permanents: p.permanents.map(perm => ({
+                card_name: perm.card_name,
+                owner: p.name,
+                controller: p.name,
+                tapped: perm.tapped || false,
+            })),
+        })),
+        active_player: activePlayerSelect.value || state.players[0]?.name || '',
+    };
+    const event = {
+        event_type: document.getElementById('event-type-select').value,
+        source_card: document.getElementById('event-source-card').value.trim() || null,
+        source_player: eventSourcePlayer.value || null,
+        details: document.getElementById('event-details').value.trim(),
+    };
+
+    boardResults.innerHTML = '<div class="loading"><span class="spinner"></span>Analyzing board event...</div>';
+
+    try {
+        const resp = await fetch('/api/board/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ board, event }),
+        });
+        if (!resp.ok) {
+            const data = await resp.json();
+            throw new Error(data.detail || 'Analysis failed');
+        }
+        const result = await resp.json();
+        renderBoardResult(result);
+    } catch (err) {
+        boardResults.innerHTML = `<div class="error">${err.message}</div>`;
+    }
+});
+
+function renderBoardResult(result) {
+    let html = '';
+
+    // Summary
+    html += `<div class="summary-box">${escapeHtml(result.summary)}</div>`;
+
+    // Stack order
+    if (result.stack_order.length) {
+        html += '<div class="results-section"><h2>Stack (resolves top-down)</h2><ul>';
+        result.stack_order.forEach((item, i) => {
+            html += `<li><strong>${i + 1}.</strong> ${escapeHtml(item)}</li>`;
+        });
+        html += '</ul></div>';
+    }
+
+    // Cascade steps
+    if (result.cascade.length) {
+        html += '<div class="results-section"><h2>Cascade Steps</h2>';
+        result.cascade.forEach(step => {
+            html += `<div class="rules-result" style="margin-bottom: 0.75rem;">`;
+            html += `<span class="rule-number">Step ${step.step_number}</span>`;
+            html += `<strong>${escapeHtml(step.event.event_type)}</strong>`;
+            if (step.event.source_card) {
+                html += ` (${escapeHtml(step.event.source_card)})`;
+            }
+            if (step.triggers_fired.length) {
+                html += `<div style="margin-top: 0.5rem; padding-left: 1rem; border-left: 2px solid var(--accent);">`;
+                step.triggers_fired.forEach(t => {
+                    html += `<div style="margin-bottom: 0.25rem;">
+                        <strong>${escapeHtml(t.permanent_name)}</strong>
+                        <span style="color: var(--text-muted);">(${escapeHtml(t.controller)})</span>:
+                        ${escapeHtml(t.trigger_text)}
+                    </div>`;
+                });
+                html += '</div>';
+            }
+            if (step.replacements_applied.length) {
+                html += `<div style="margin-top: 0.5rem; padding-left: 1rem; border-left: 2px solid var(--warning);">`;
+                step.replacements_applied.forEach(r => {
+                    html += `<div style="margin-bottom: 0.25rem;">
+                        <strong>${escapeHtml(r.permanent_name)}</strong> replaces:
+                        ${escapeHtml(r.replacement_text)}
+                    </div>`;
+                });
+                html += '</div>';
+            }
+            if (step.notes.length) {
+                html += '<ul style="margin-top: 0.5rem; padding-left: 1.5rem; list-style: disc;">';
+                step.notes.forEach(n => { html += `<li>${escapeHtml(n)}</li>`; });
+                html += '</ul>';
+            }
+            html += '</div>';
+        });
+        html += '</div>';
+    }
+
+    // Warnings
+    if (result.warnings.length) {
+        html += '<div class="results-section"><h2>Warnings</h2><ul>';
+        result.warnings.forEach(w => {
+            html += `<li style="color: var(--warning);">${escapeHtml(w)}</li>`;
+        });
+        html += '</ul></div>';
+    }
+
+    boardResults.innerHTML = html;
+}
+
 // Init
 renderCardTags();
+renderPlayers();

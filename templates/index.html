@@ -13,13 +13,75 @@
 
     <main>
         <div class="tabs">
-            <button class="tab active" data-panel="interactions">Interactions</button>
+            <button class="tab active" data-panel="board">Board State</button>
+            <button class="tab" data-panel="interactions">Interactions</button>
             <button class="tab" data-panel="cards">Card Search</button>
             <button class="tab" data-panel="rules">Rules Lookup</button>
         </div>
 
+        <!-- Board State Panel -->
+        <div id="board" class="panel active">
+            <div class="interaction-input">
+                <h2>Board State Analyzer</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;">
+                    Build the board state for each player, then trigger an event to see the
+                    full cascade: what triggers fire, in what order (APNAP), what they cause,
+                    and how replacement effects and static abilities modify everything.
+                </p>
+
+                <!-- Player management -->
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
+                    <input type="text" id="player-name-input" placeholder="Player name"
+                           style="width: 200px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
+                    <button id="add-player-btn">Add Player</button>
+                    <span style="color: var(--text-muted); font-size: 0.85rem; margin-left: 0.5rem;">
+                        Active player:
+                    </span>
+                    <select id="active-player-select" class="format-select" style="min-width: 120px;">
+                        <option value="">-- select --</option>
+                    </select>
+                </div>
+
+                <div id="players-container"></div>
+
+                <!-- Event trigger -->
+                <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+                    <h3 style="margin-bottom: 0.75rem; font-size: 1rem;">Trigger an Event</h3>
+                    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+                        <select id="event-type-select" class="format-select" style="min-width: 160px;">
+                            <option value="cast_spell">Cast Spell</option>
+                            <option value="enters_battlefield">Enters Battlefield</option>
+                            <option value="dies">Dies</option>
+                            <option value="draw_card">Draw Card</option>
+                            <option value="damage_dealt">Damage Dealt</option>
+                            <option value="gain_life">Gain Life</option>
+                            <option value="lose_life">Lose Life</option>
+                            <option value="discard">Discard</option>
+                            <option value="attacks">Attacks</option>
+                            <option value="blocks">Blocks</option>
+                            <option value="create_token">Create Token</option>
+                            <option value="activate_ability">Activate Ability</option>
+                            <option value="leaves_battlefield">Leaves Battlefield</option>
+                            <option value="upkeep">Upkeep</option>
+                            <option value="end_step">End Step</option>
+                        </select>
+                        <input type="text" id="event-source-card" placeholder="Source card (optional)"
+                               style="width: 180px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
+                        <select id="event-source-player" class="format-select" style="min-width: 120px;">
+                            <option value="">Source player</option>
+                        </select>
+                        <input type="text" id="event-details" placeholder="Details (e.g. 'creature spell')"
+                               style="width: 200px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
+                        <button id="run-event-btn" disabled>Analyze Event</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="board-results"></div>
+        </div>
+
         <!-- Interactions Panel -->
-        <div id="interactions" class="panel active">
+        <div id="interactions" class="panel">
             <div class="interaction-input">
                 <h2>Analyze Card Interactions</h2>
                 <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;">

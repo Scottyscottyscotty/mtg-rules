@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.routers import cards, interactions, rules
+from app.routers import board, cards, interactions, rules
 from app.services.rules_engine import rules_engine
 
 
@@ -28,6 +28,7 @@ app = FastAPI(
 app.include_router(cards.router)
 app.include_router(rules.router)
 app.include_router(interactions.router)
+app.include_router(board.router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 templates = Jinja2Templates(directory="templates")
