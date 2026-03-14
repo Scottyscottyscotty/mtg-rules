@@ -1,5 +1,9 @@
 """Run the MTG Rules Engine server."""
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import uvicorn
 
 if __name__ == "__main__":

@@ -1,15 +1,24 @@
-"""Board state analyzer with cascade resolution.
+"""Board state analyzer powered by Claude API.
 
 Given a board state (all players' permanents) and a game event,
-determines:
-1. Which replacement effects modify the event before it happens
-2. Which triggered abilities fire from the event
-3. What new events those triggers produce
-4. Recursively resolves the full cascade (triggers causing triggers)
-5. Determines APNAP stack ordering for multiplayer
+sends everything to Claude to determine:
+1. Which replacement effects modify the event
+2. Which triggered abilities fire
+3. What state-based actions occur (e.g., creatures dying from -2/-2)
+4. The full cascade of triggers causing more triggers
+5. APNAP stack ordering for multiplayer
+6. Plain English explanation
 
-This is the heart of the multiplayer interaction engine.
+This replaces the regex-based approach, which couldn't handle implicit
+effects like creatures dying from toughness reduction, continuous
+effects, or complex card interactions.
 """
+
+import asyncio
+import json
+import os
+
+import anthropic
 
 from app.models.board import (
     BoardAnalysisRequest,
@@ -22,153 +31,221 @@ from app.models.board import (
     PlayerState,
     ReplacementEffect,
 )
-from app.services.event_detector import (
-    detect_replacements,
-    detect_static_modifications,
-    detect_triggers,
-)
-import asyncio
-
 from app.services.scryfall import fetch_card
 
-# Safety limit to prevent infinite loops
-MAX_CASCADE_DEPTH = 20
+BOARD_ANALYSIS_SYSTEM = """\
+You are an expert Magic: The Gathering judge analyzing a board state interaction. \
+You have perfect knowledge of the comprehensive rules, including:
+- The stack (rule 405) and LIFO resolution
+- Priority and APNAP ordering (rule 101.4) for multiplayer
+- State-based actions (rule 704) — creatures with 0 or less toughness die, etc.
+- Triggered abilities (rule 603) — "when", "whenever", "at"
+- Replacement effects (rule 614) — "if ... would ... instead"
+- Continuous effects and the layer system (rule 613)
+- How sacrifice works (the permanent dies after being sacrificed)
+
+You must trace through the COMPLETE chain of events, including:
+- Effects that cause state-based actions (e.g., -2/-2 killing creatures)
+- Triggers that fire from those state-based actions
+- Cascading triggers (triggers causing more triggers)
+- Which player controls each trigger for APNAP ordering
+
+Be thorough. Walk through every single thing that happens in order.\
+"""
+
+ANALYSIS_PROMPT_TEMPLATE = """\
+Analyze this board state and event. Trace through EVERYTHING that happens, \
+step by step, including state-based actions, cascading triggers, and APNAP ordering.
+
+## Board State
+
+{board_description}
+
+## Event
+
+{event_description}
+
+## Card Oracle Text (from Scryfall)
+
+{card_texts}
+
+## Instructions
+
+Respond with a JSON object matching this exact structure. Do NOT include anything \
+outside the JSON object — no markdown fences, no commentary.
+
+{{
+  "cascade": [
+    {{
+      "step_number": 1,
+      "event": {{
+        "event_type": "<one of: cast_spell, enters_battlefield, dies, sacrifice, draw_card, damage_dealt, gain_life, lose_life, discard, attacks, blocks, leaves_battlefield, create_token, upkeep, end_step, activate_ability, triggered_ability, spell_resolves, spell_countered, combat_damage, counter_placed, counter_removed, mill, draw_step>",
+        "source_card": "<card name or null>",
+        "source_player": "<player name or null>",
+        "target_card": "<card name or null>",
+        "target_player": "<player name or null>",
+        "details": "<what's happening>",
+        "amount": null
+      }},
+      "triggers_fired": [
+        {{
+          "permanent_name": "<card that triggers>",
+          "controller": "<who controls it>",
+          "trigger_text": "<the relevant ability text>",
+          "caused_by": {{
+            "event_type": "<event type>",
+            "source_card": null,
+            "source_player": null,
+            "details": "<brief description>"
+          }},
+          "resulting_events": []
+        }}
+      ],
+      "replacements_applied": [
+        {{
+          "permanent_name": "<card>",
+          "controller": "<player>",
+          "replacement_text": "<the replacement text>",
+          "original_event": {{
+            "event_type": "<event type>",
+            "details": "<what was going to happen>"
+          }}
+        }}
+      ],
+      "notes": ["<explanation of what happens in this step>"]
+    }}
+  ],
+  "stack_order": ["<item 1 (resolves first)>", "<item 2>"],
+  "warnings": ["<any rules edge cases or ambiguities>"],
+  "summary": "<technical step-by-step summary>",
+  "plain_english": "<casual, friendly explanation written like you're explaining it to someone at the table. Start with 'Okay, so here\\'s what happens...' and walk through each thing that occurs in plain language. Mention which players are affected and why. Use a conversational tone.>"
+}}
+
+Important:
+- Include ALL cascade steps, including state-based actions causing deaths
+- event_type values must be exactly one of the enum values listed above
+- Every trigger must reference which event caused it
+- Stack order should be listed in resolution order (last in, first out)
+- For multiplayer, active player's triggers go on stack first (resolve last per APNAP)
+- The plain_english field should be thorough but readable — like a judge explaining at the table
+- If a card's oracle text wasn't provided (not found on Scryfall), mention it in warnings\
+"""
 
 
 async def analyze_board_event(request: BoardAnalysisRequest) -> BoardAnalysisResult:
     """Analyze what happens when an event occurs on a given board state."""
     board = request.board
     event = request.event
-
-    # Resolve the cascade
-    cascade: list[CascadeStep] = []
     warnings: list[str] = []
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise ValueError(
+            "ANTHROPIC_API_KEY environment variable is not set. "
+            "Set it in your .env file to use the board analyzer."
+        )
 
     # Fetch oracle text for all permanents on the board
     card_texts = await _fetch_all_card_texts(board, warnings)
-    stack_order: list[str] = []
 
-    # Determine APNAP order (Active Player, Non-Active Player)
-    apnap_order = _get_apnap_order(board)
+    # Build the prompt
+    board_desc = _describe_board(board)
+    event_desc = _describe_event(event)
+    cards_desc = _describe_card_texts(card_texts)
 
-    # Process the initial event through the cascade.
-    # Sacrifice implies death — queue both events so "dies" triggers also fire.
-    events_to_process = [event]
-    if event.event_type == EventType.SACRIFICE:
-        dies_event = GameEvent(
-            event_type=EventType.DIES,
-            source_card=event.source_card,
-            source_player=event.source_player,
-            target_card=event.target_card,
-            target_player=event.target_player,
-            details=f"{event.source_card or 'A permanent'} was sacrificed and dies",
-        )
-        events_to_process.append(dies_event)
-    depth = 0
-
-    while events_to_process and depth < MAX_CASCADE_DEPTH:
-        current_event = events_to_process.pop(0)
-        step = CascadeStep(
-            step_number=depth + 1,
-            event=current_event,
-        )
-
-        # 1. Check replacement effects first (they modify the event)
-        all_replacements: list[ReplacementEffect] = []
-        for player in board.players:
-            for permanent in player.permanents:
-                oracle = card_texts.get(permanent.card_name, "")
-                if not oracle:
-                    continue
-                replacements = detect_replacements(
-                    permanent, oracle, current_event
-                )
-                all_replacements.extend(replacements)
-
-        if all_replacements:
-            step.replacements_applied = all_replacements
-            if len(all_replacements) > 1:
-                affected = current_event.target_player or current_event.source_player
-                step.notes.append(
-                    f"Multiple replacement effects apply to this event. "
-                    f"The affected player ({affected or 'controller'}) "
-                    f"chooses which to apply first (rule 616.1)."
-                )
-            for r in all_replacements:
-                step.notes.append(
-                    f"  Replacement from {r.permanent_name} "
-                    f"(controlled by {r.controller}): {r.replacement_text}"
-                )
-
-        # 2. Check static ability modifications
-        for player in board.players:
-            for permanent in player.permanents:
-                oracle = card_texts.get(permanent.card_name, "")
-                if not oracle:
-                    continue
-                static_notes = detect_static_modifications(oracle, current_event)
-                step.notes.extend(
-                    f"[{permanent.card_name}] {n}" for n in static_notes
-                )
-
-        # 3. Detect triggered abilities in APNAP order
-        all_triggers: list[DetectedTrigger] = []
-        for player_name in apnap_order:
-            player = _find_player(board, player_name)
-            if not player:
-                continue
-            player_triggers: list[DetectedTrigger] = []
-            for permanent in player.permanents:
-                oracle = card_texts.get(permanent.card_name, "")
-                if not oracle:
-                    continue
-                triggers = detect_triggers(permanent, oracle, current_event)
-                player_triggers.extend(triggers)
-
-            if player_triggers:
-                all_triggers.extend(player_triggers)
-                # In APNAP, active player's triggers go on stack first
-                # (so they resolve last — LIFO)
-                for t in player_triggers:
-                    stack_order.append(
-                        f"{t.permanent_name} ({t.controller}): {t.trigger_text}"
-                    )
-
-        step.triggers_fired = all_triggers
-
-        if all_triggers:
-            step.notes.append(
-                f"{len(all_triggers)} triggered ability(ies) fire in APNAP order."
-            )
-            for t in all_triggers:
-                step.notes.append(
-                    f"  {t.permanent_name} ({t.controller}): {t.trigger_text}"
-                )
-                # Queue the resulting events for cascade processing
-                events_to_process.extend(t.resulting_events)
-
-        cascade.append(step)
-        depth += 1
-
-    if depth >= MAX_CASCADE_DEPTH:
-        warnings.append(
-            f"Cascade depth limit ({MAX_CASCADE_DEPTH}) reached. "
-            "There may be additional triggers not shown. This can happen "
-            "with infinite or near-infinite loops."
-        )
-
-    # Build summary
-    summary = _build_board_summary(event, cascade, stack_order, warnings, board)
-    plain_english = _build_plain_english(event, cascade, stack_order, board)
-
-    return BoardAnalysisResult(
-        original_event=event,
-        cascade=cascade,
-        stack_order=list(reversed(stack_order)),  # LIFO — last added resolves first
-        warnings=warnings,
-        summary=summary,
-        plain_english=plain_english,
+    prompt = ANALYSIS_PROMPT_TEMPLATE.format(
+        board_description=board_desc,
+        event_description=event_desc,
+        card_texts=cards_desc,
     )
+
+    # Call Claude
+    client = anthropic.AsyncAnthropic(api_key=api_key)
+    response = await client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=4000,
+        system=BOARD_ANALYSIS_SYSTEM,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    raw_text = response.content[0].text
+
+    # Parse the JSON response
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError:
+        # Try to extract JSON from markdown fences
+        import re
+        json_match = re.search(r"```(?:json)?\s*(.*?)```", raw_text, re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group(1))
+        else:
+            # Return a readable error with the raw response
+            return BoardAnalysisResult(
+                original_event=event,
+                cascade=[],
+                stack_order=[],
+                warnings=["Failed to parse Claude's response. Raw output included in summary."],
+                summary=raw_text,
+                plain_english=raw_text,
+            )
+
+    # Convert the JSON into our typed models
+    return _parse_analysis_response(data, event, warnings)
+
+
+def _describe_board(board: BoardState) -> str:
+    """Build a human-readable board description for the prompt."""
+    lines = []
+    lines.append(f"Active player: {board.active_player or 'not specified'}")
+    lines.append(f"Number of players: {len(board.players)}")
+    lines.append("")
+
+    for player in board.players:
+        lines.append(f"### {player.name} (Life: {player.life})")
+        if player.permanents:
+            for perm in player.permanents:
+                ctrl = ""
+                if perm.controller and perm.controller != perm.owner:
+                    ctrl = f" (controlled by {perm.controller})"
+                tapped = " [TAPPED]" if perm.tapped else ""
+                lines.append(f"  - {perm.card_name}{ctrl}{tapped}")
+        else:
+            lines.append("  - (no permanents)")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _describe_event(event: GameEvent) -> str:
+    """Build a human-readable event description."""
+    parts = [f"Type: {event.event_type.value}"]
+    if event.source_card:
+        parts.append(f"Source card: {event.source_card}")
+    if event.source_player:
+        parts.append(f"Source player: {event.source_player}")
+    if event.target_card:
+        parts.append(f"Target card: {event.target_card}")
+    if event.target_player:
+        parts.append(f"Target player: {event.target_player}")
+    if event.details:
+        parts.append(f"Details: {event.details}")
+    if event.amount is not None:
+        parts.append(f"Amount: {event.amount}")
+    return "\n".join(parts)
+
+
+def _describe_card_texts(card_texts: dict[str, str]) -> str:
+    """Format card oracle texts for the prompt."""
+    if not card_texts:
+        return "(No card texts were retrieved — Scryfall lookups may have failed)"
+
+    lines = []
+    for name, oracle in card_texts.items():
+        lines.append(f"**{name}**:")
+        lines.append(f"  {oracle}")
+        lines.append("")
+    return "\n".join(lines)
 
 
 async def _fetch_all_card_texts(
@@ -206,247 +283,79 @@ async def _fetch_all_card_texts(
     return texts
 
 
-def _get_apnap_order(board: BoardState) -> list[str]:
-    """Get Active Player, Non-Active Player ordering.
-
-    The active player's triggers go on the stack first, then each
-    other player in turn order. Since they go on first, they resolve
-    last (LIFO).
-    """
-    player_names = [p.name for p in board.players]
-    if board.active_player and board.active_player in player_names:
-        idx = player_names.index(board.active_player)
-        return player_names[idx:] + player_names[:idx]
-    return player_names
-
-
-def _find_player(board: BoardState, name: str) -> PlayerState | None:
-    for p in board.players:
-        if p.name == name:
-            return p
-    return None
-
-
-def _build_board_summary(
-    event: GameEvent,
-    cascade: list[CascadeStep],
-    stack_order: list[str],
+def _parse_analysis_response(
+    data: dict,
+    original_event: GameEvent,
     warnings: list[str],
-    board: BoardState,
-) -> str:
-    parts = []
-
-    # Header
-    event_desc = f"{event.event_type.value}"
-    if event.source_card:
-        event_desc += f" ({event.source_card})"
-    if event.source_player:
-        event_desc += f" by {event.source_player}"
-    parts.append(f"Event: {event_desc}")
-    parts.append(f"Players: {', '.join(p.name for p in board.players)}")
-
-    # Board overview
-    parts.append("\nBoard state:")
-    for player in board.players:
-        perm_names = [p.card_name for p in player.permanents]
-        parts.append(f"  {player.name} ({player.life} life): {', '.join(perm_names) or 'no permanents'}")
-
-    # Cascade summary
-    total_triggers = sum(len(s.triggers_fired) for s in cascade)
-    total_replacements = sum(len(s.replacements_applied) for s in cascade)
-    parts.append(f"\nCascade: {len(cascade)} step(s), {total_triggers} trigger(s), {total_replacements} replacement(s)")
-
-    # Step-by-step
-    for step in cascade:
-        parts.append(f"\nStep {step.step_number}: {step.event.event_type.value}")
-        if step.event.source_card:
-            parts.append(f"  Source: {step.event.source_card}")
-        for note in step.notes:
-            parts.append(f"  {note}")
-
-    # Stack resolution order
-    if stack_order:
-        parts.append("\nStack (resolves top to bottom):")
-        for i, item in enumerate(stack_order, 1):
-            parts.append(f"  {i}. {item}")
-
-    # Warnings
-    for w in warnings:
-        parts.append(f"\nWarning: {w}")
-
-    return "\n".join(parts)
-
-
-# Friendly names for event types
-_EVENT_DESCRIPTIONS = {
-    "cast_spell": "casts a spell",
-    "enters_battlefield": "enters the battlefield",
-    "leaves_battlefield": "leaves the battlefield",
-    "dies": "dies",
-    "sacrifice": "sacrifices a permanent",
-    "draw_card": "draws a card",
-    "discard": "discards",
-    "damage_dealt": "deals damage",
-    "gain_life": "gains life",
-    "lose_life": "loses life",
-    "attacks": "attacks",
-    "blocks": "blocks",
-    "create_token": "creates a token",
-    "activate_ability": "activates an ability",
-    "triggered_ability": "triggers an ability",
-    "spell_resolves": "has a spell resolve",
-    "spell_countered": "has a spell countered",
-    "combat_damage": "deals combat damage",
-    "counter_placed": "has counters placed",
-    "counter_removed": "has counters removed",
-    "mill": "mills cards",
-    "upkeep": "begins their upkeep",
-    "draw_step": "begins their draw step",
-    "end_step": "begins the end step",
-}
-
-_EFFECT_DESCRIPTIONS = {
-    "draw_card": "draw",
-    "damage_dealt": "deal damage",
-    "gain_life": "gain life",
-    "lose_life": "lose life",
-    "create_token": "create a token",
-    "dies": "destroy something",
-    "sacrifice": "sacrifice something",
-    "discard": "discard",
-    "leaves_battlefield": "exile something",
-    "spell_countered": "counter a spell",
-    "counter_placed": "put counters on something",
-    "mill": "mill",
-}
-
-
-def _build_plain_english(
-    event: GameEvent,
-    cascade: list[CascadeStep],
-    stack_order: list[str],
-    board: BoardState,
-) -> str:
-    """Build a plain English walkthrough of what happens.
-
-    Written like you'd explain it to someone at the table:
-    "Okay so here's what happens..."
-    """
-    lines = []
-
-    # Opening — describe what kicked this off
-    event_desc = _EVENT_DESCRIPTIONS.get(event.event_type.value, event.event_type.value)
-    who = event.source_player or "A player"
-    what_card = f" ({event.source_card})" if event.source_card else ""
-    lines.append(f"Okay, so {who} {event_desc}{what_card}. Here's what happens:\n")
-
-    # Check if anything actually triggers
-    total_triggers = sum(len(s.triggers_fired) for s in cascade)
-    total_replacements = sum(len(s.replacements_applied) for s in cascade)
-
-    if total_triggers == 0 and total_replacements == 0:
-        lines.append(
-            "Nothing on the board cares about this. "
-            "It just happens normally — no triggers, no funny business."
+) -> BoardAnalysisResult:
+    """Convert Claude's JSON response into typed BoardAnalysisResult."""
+    cascade = []
+    for step_data in data.get("cascade", []):
+        step = CascadeStep(
+            step_number=step_data.get("step_number", 0),
+            event=_parse_event(step_data.get("event", {})),
+            triggers_fired=[
+                _parse_trigger(t) for t in step_data.get("triggers_fired", [])
+            ],
+            replacements_applied=[
+                _parse_replacement(r)
+                for r in step_data.get("replacements_applied", [])
+            ],
+            notes=step_data.get("notes", []),
         )
-        return "\n".join(lines)
+        cascade.append(step)
 
-    # Walk through replacements first (they happen before the event)
-    step_num = 1
-    has_replacements = False
-    for step in cascade:
-        if not step.replacements_applied:
-            continue
-        if not has_replacements:
-            lines.append("BEFORE it happens:")
-            has_replacements = True
-        for r in step.replacements_applied:
-            lines.append(
-                f"  {step_num}. Hold on — {r.permanent_name} "
-                f"({r.controller}'s) changes how this works. "
-                f"Instead of the normal thing, {r.replacement_text}"
-            )
-            step_num += 1
+    # Merge any warnings from Claude with our fetch warnings
+    claude_warnings = data.get("warnings", [])
+    all_warnings = warnings + claude_warnings
 
-        if len(step.replacements_applied) > 1:
-            affected = step.event.target_player or step.event.source_player or "the affected player"
-            lines.append(
-                f"\n  (Multiple things are trying to change this event. "
-                f"{affected} gets to pick which one applies first.)\n"
-            )
+    return BoardAnalysisResult(
+        original_event=original_event,
+        cascade=cascade,
+        stack_order=data.get("stack_order", []),
+        warnings=all_warnings,
+        summary=data.get("summary", ""),
+        plain_english=data.get("plain_english", ""),
+    )
 
-    # Walk through triggers in the order they resolve (stack order is already reversed)
-    if total_triggers > 0:
-        lines.append("\nTHEN, a bunch of things trigger:\n")
 
-        # Group triggers by cascade step for narrative flow
-        trigger_num = 1
-        for step in cascade:
-            if not step.triggers_fired:
-                continue
+def _parse_event(data: dict) -> GameEvent:
+    """Parse a GameEvent from Claude's JSON."""
+    event_type_str = data.get("event_type", "triggered_ability")
+    try:
+        event_type = EventType(event_type_str)
+    except ValueError:
+        event_type = EventType.TRIGGERED_ABILITY
 
-            step_event_desc = _EVENT_DESCRIPTIONS.get(
-                step.event.event_type.value, step.event.event_type.value
-            )
+    return GameEvent(
+        event_type=event_type,
+        source_card=data.get("source_card"),
+        source_player=data.get("source_player"),
+        target_card=data.get("target_card"),
+        target_player=data.get("target_player"),
+        details=data.get("details", ""),
+        amount=data.get("amount"),
+    )
 
-            # If this isn't the first event, explain what caused this wave
-            if step.step_number > 1:
-                source = step.event.source_card or "that"
-                lines.append(
-                    f"\n  ...and because of {source}, even MORE things trigger:\n"
-                )
 
-            for trigger in step.triggers_fired:
-                # Describe the trigger in plain English
-                effect_parts = []
-                for resulting in trigger.resulting_events:
-                    desc = _EFFECT_DESCRIPTIONS.get(
-                        resulting.event_type.value, resulting.event_type.value
-                    )
-                    if resulting.amount:
-                        desc = f"{desc} ({resulting.amount})"
-                    effect_parts.append(desc)
+def _parse_trigger(data: dict) -> DetectedTrigger:
+    """Parse a DetectedTrigger from Claude's JSON."""
+    return DetectedTrigger(
+        permanent_name=data.get("permanent_name", "Unknown"),
+        controller=data.get("controller", "Unknown"),
+        trigger_text=data.get("trigger_text", ""),
+        caused_by=_parse_event(data.get("caused_by", {})),
+        resulting_events=[
+            _parse_event(e) for e in data.get("resulting_events", [])
+        ],
+    )
 
-                effect_str = ""
-                if effect_parts:
-                    effect_str = f" This is going to {', '.join(effect_parts)}."
 
-                lines.append(
-                    f"  {trigger_num}. {trigger.controller}'s "
-                    f"{trigger.permanent_name} sees this and triggers.{effect_str}"
-                )
-                trigger_num += 1
-
-    # Explain resolution order
-    if total_triggers > 1:
-        lines.append("\nHOW IT RESOLVES:")
-        lines.append(
-            "All these triggers go on the stack. Remember, the stack is "
-            "last-in-first-out, so the LAST thing added resolves FIRST.\n"
-        )
-
-        # Explain APNAP in plain terms if multiplayer
-        if len(board.players) > 2:
-            active = board.active_player or board.players[0].name
-            lines.append(
-                f"Since this is multiplayer, {active}'s triggers go on the stack "
-                f"first (because they're the active player), then each other player "
-                f"in turn order. That means {active}'s triggers actually resolve "
-                f"LAST.\n"
-            )
-
-        reversed_stack = list(reversed(stack_order))
-        lines.append("So in order, here's what actually happens:")
-        for i, item in enumerate(reversed_stack, 1):
-            # Simplify the stack item
-            lines.append(f"  {i}. {item}")
-
-    # Closing — any chain reactions?
-    if len(cascade) > 1:
-        lines.append(
-            f"\nHeads up: this creates a chain reaction "
-            f"({len(cascade)} waves of triggers total). Each trigger's effect "
-            f"can cause MORE triggers, so pay attention to the order."
-        )
-
-    return "\n".join(lines)
+def _parse_replacement(data: dict) -> ReplacementEffect:
+    """Parse a ReplacementEffect from Claude's JSON."""
+    return ReplacementEffect(
+        permanent_name=data.get("permanent_name", "Unknown"),
+        controller=data.get("controller", "Unknown"),
+        replacement_text=data.get("replacement_text", ""),
+        original_event=_parse_event(data.get("original_event", {})),
+    )
