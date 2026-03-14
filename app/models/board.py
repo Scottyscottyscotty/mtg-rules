@@ -33,6 +33,7 @@ class EventType(str, Enum):
     ENTERS_BATTLEFIELD = "enters_battlefield"
     LEAVES_BATTLEFIELD = "leaves_battlefield"
     DIES = "dies"
+    SACRIFICE = "sacrifice"
 
     # Combat
     ATTACKS = "attacks"

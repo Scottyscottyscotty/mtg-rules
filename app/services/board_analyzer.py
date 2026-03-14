@@ -17,6 +17,7 @@ from app.models.board import (
     BoardState,
     CascadeStep,
     DetectedTrigger,
+    EventType,
     GameEvent,
     PlayerState,
     ReplacementEffect,
@@ -48,8 +49,19 @@ async def analyze_board_event(request: BoardAnalysisRequest) -> BoardAnalysisRes
     # Determine APNAP order (Active Player, Non-Active Player)
     apnap_order = _get_apnap_order(board)
 
-    # Process the initial event through the cascade
+    # Process the initial event through the cascade.
+    # Sacrifice implies death — queue both events so "dies" triggers also fire.
     events_to_process = [event]
+    if event.event_type == EventType.SACRIFICE:
+        dies_event = GameEvent(
+            event_type=EventType.DIES,
+            source_card=event.source_card,
+            source_player=event.source_player,
+            target_card=event.target_card,
+            target_player=event.target_player,
+            details=f"{event.source_card or 'A permanent'} was sacrificed and dies",
+        )
+        events_to_process.append(dies_event)
     depth = 0
 
     while events_to_process and depth < MAX_CASCADE_DEPTH:
@@ -249,6 +261,7 @@ _EVENT_DESCRIPTIONS = {
     "enters_battlefield": "enters the battlefield",
     "leaves_battlefield": "leaves the battlefield",
     "dies": "dies",
+    "sacrifice": "sacrifices a permanent",
     "draw_card": "draws a card",
     "discard": "discards",
     "damage_dealt": "deals damage",
@@ -277,6 +290,7 @@ _EFFECT_DESCRIPTIONS = {
     "lose_life": "lose life",
     "create_token": "create a token",
     "dies": "destroy something",
+    "sacrifice": "sacrifice something",
     "discard": "discard",
     "leaves_battlefield": "exile something",
     "spell_countered": "counter a spell",

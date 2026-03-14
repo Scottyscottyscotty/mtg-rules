@@ -30,11 +30,18 @@ TRIGGER_PATTERNS: list[tuple[str, EventType, str]] = [
     (r"whenever another creature enters",
      EventType.ENTERS_BATTLEFIELD, "Triggers when another creature ETBs"),
 
-    # Death triggers
+    # Death triggers (sacrifice also causes death)
     (r"when(?:ever)? .* dies",
      EventType.DIES, "Triggers when something dies"),
     (r"whenever a( nontoken)? creature( you control)? dies",
      EventType.DIES, "Triggers when a creature dies"),
+
+    # Sacrifice triggers
+    (r"whenever (?:a player|an opponent|you) sacrifices?",
+     EventType.SACRIFICE, "Triggers when something is sacrificed"),
+    (r"when(?:ever)? .* is sacrificed",
+     EventType.SACRIFICE, "Triggers when something is sacrificed"),
+    # Sacrifice also triggers "dies" — handled in board_analyzer
 
     # Draw triggers
     (r"whenever (?:a player|an opponent|you) draws? (?:a |one or more )?cards?",
@@ -91,7 +98,7 @@ EFFECT_PATTERNS: list[tuple[str, EventType]] = [
     (r"lose(?:s)? (\d+) life", EventType.LOSE_LIFE),
     (r"create(?:s)? .* tokens?", EventType.CREATE_TOKEN),
     (r"destroy(?:s)? (?:target |all )", EventType.DIES),
-    (r"sacrifice(?:s)? ", EventType.DIES),
+    (r"sacrifice(?:s)? ", EventType.SACRIFICE),
     (r"discard(?:s)? ", EventType.DISCARD),
     (r"exile(?:s)? ", EventType.LEAVES_BATTLEFIELD),
     (r"counter(?:s)? target", EventType.SPELL_COUNTERED),
