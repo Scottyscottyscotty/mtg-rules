@@ -26,6 +26,7 @@ from app.models.board import (
     BoardState,
     CascadeStep,
     DetectedTrigger,
+    DidNotTrigger,
     EventType,
     GameEvent,
     PlayerState,
@@ -129,8 +130,15 @@ outside the JSON object — no markdown fences, no commentary.
   ],
   "stack_order": ["<item 1 (resolves first)>", "<item 2>"],
   "warnings": ["<any rules edge cases or ambiguities>"],
+  "did_not_trigger": [
+    {{
+      "permanent_name": "<card that did NOT trigger>",
+      "controller": "<who controls it>",
+      "reason": "<clear explanation of WHY it didn't trigger, citing the specific rules distinction — e.g., '-2/-2 is a continuous effect applied in layer 7c, NOT -1/-1 counters, so abilities that trigger from counters being placed do not fire'>"
+    }}
+  ],
   "summary": "<technical step-by-step summary>",
-  "plain_english": "<casual, friendly explanation written like you're explaining it to someone at the table. Start with 'Okay, so here\\'s what happens...' and walk through each thing that occurs in plain language. Mention which players are affected and why. Use a conversational tone.>"
+  "plain_english": "<casual, friendly explanation written like you're explaining it to someone at the table. Start with 'Okay, so here\\'s what happens...' and walk through each thing that occurs in plain language. Mention which players are affected and why. Use a conversational tone. IMPORTANT: After explaining what DOES happen, add a section starting with 'What does NOT trigger:' that explains which permanents on the board might LOOK like they should trigger but don't, and why. This is crucial — players often confuse similar-sounding mechanics (e.g., -2/-2 continuous effects vs -1/-1 counters, losing life vs taking damage, sacrifice vs destroy). Call out these distinctions clearly.>"
 }}
 
 Important:
@@ -140,7 +148,13 @@ Important:
 - Stack order should be listed in resolution order (last in, first out)
 - For multiplayer, active player's triggers go on stack first (resolve last per APNAP)
 - The plain_english field should be thorough but readable — like a judge explaining at the table
-- If a card's oracle text wasn't provided (not found on Scryfall), mention it in warnings\
+- If a card's oracle text wasn't provided (not found on Scryfall), mention it in warnings
+- CRITICAL: For EVERY permanent on the board that has triggered abilities but did NOT trigger from this event, include it in "did_not_trigger" with a clear explanation of WHY. This helps players understand common rules misconceptions like:
+  * -X/-X continuous effects vs -1/-1 counters (different mechanics)
+  * Losing life vs being dealt damage (different events)
+  * Sacrifice vs destroy (different actions, though both cause dying)
+  * "Leaves the battlefield" vs "dies" (dies is specific to going to graveyard)
+  * "Cast" vs "enters the battlefield" (casting puts on stack, ETB is when it resolves)\
 """
 
 
@@ -337,11 +351,22 @@ def _parse_analysis_response(
     claude_warnings = data.get("warnings", [])
     all_warnings = warnings + claude_warnings
 
+    # Parse "did not trigger" explanations
+    did_not_trigger = [
+        DidNotTrigger(
+            permanent_name=d.get("permanent_name", "Unknown"),
+            controller=d.get("controller", "Unknown"),
+            reason=d.get("reason", ""),
+        )
+        for d in data.get("did_not_trigger", [])
+    ]
+
     return BoardAnalysisResult(
         original_event=original_event,
         cascade=cascade,
         stack_order=data.get("stack_order", []),
         warnings=all_warnings,
+        did_not_trigger=did_not_trigger,
         summary=data.get("summary", ""),
         plain_english=data.get("plain_english", ""),
     )

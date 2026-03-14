@@ -487,6 +487,17 @@ function renderBoardResult(result) {
     // Plain English view (shown by default)
     html += `<div id="board-view-plain" class="board-view active">`;
     html += `<div class="summary-box plain-english-box">${escapeHtml(result.plain_english)}</div>`;
+    if (result.did_not_trigger && result.did_not_trigger.length) {
+        html += '<div class="results-section" style="margin-top: 1rem;"><h2 style="color: #f0a040;">⚠ Did NOT Trigger</h2>';
+        result.did_not_trigger.forEach(d => {
+            html += `<div style="margin-bottom: 0.75rem; padding: 0.75rem; background: rgba(240, 160, 64, 0.08); border-left: 3px solid #f0a040; border-radius: 4px;">
+                <strong>${escapeHtml(d.permanent_name)}</strong>
+                <span style="color: var(--text-muted);"> (${escapeHtml(d.controller)})</span>
+                <div style="margin-top: 0.25rem; color: var(--text-muted);">${escapeHtml(d.reason)}</div>
+            </div>`;
+        });
+        html += '</div>';
+    }
     if (result.warnings.length) {
         html += '<div class="results-section" style="margin-top: 1rem;"><h2>Heads Up</h2><ul>';
         result.warnings.forEach(w => {

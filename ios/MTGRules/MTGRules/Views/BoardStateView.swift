@@ -267,6 +267,41 @@ struct BoardStateView: View {
                 }
             }
 
+            // Did Not Trigger
+            if !result.didNotTrigger.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "xmark.octagon")
+                            .foregroundColor(.orange)
+                        Text("Did NOT Trigger")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.orange)
+                    }
+
+                    ForEach(result.didNotTrigger) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.permanentName)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
+                            Text(item.reason)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineSpacing(2)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                .padding()
+                .background(Color("CardBackground"))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                )
+                .cornerRadius(8)
+            }
+
             // Warnings
             ForEach(result.warnings, id: \.self) { warning in
                 HStack {

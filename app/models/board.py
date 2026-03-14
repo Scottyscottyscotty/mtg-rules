@@ -145,11 +145,19 @@ class BoardAnalysisRequest(BaseModel):
     event: GameEvent
 
 
+class DidNotTrigger(BaseModel):
+    """A permanent that did NOT trigger, with an explanation of why."""
+    permanent_name: str
+    controller: str
+    reason: str
+
+
 class BoardAnalysisResult(BaseModel):
     """Full cascade analysis of an event on a board state."""
     original_event: GameEvent
     cascade: list[CascadeStep] = []
     stack_order: list[str] = []
     warnings: list[str] = []
+    did_not_trigger: list[DidNotTrigger] = []
     summary: str = ""
     plain_english: str = ""

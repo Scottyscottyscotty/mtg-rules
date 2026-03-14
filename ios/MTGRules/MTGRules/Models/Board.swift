@@ -96,11 +96,25 @@ struct CascadeStep: Codable, Identifiable {
     }
 }
 
+struct DidNotTrigger: Codable, Identifiable {
+    var id: String { permanentName + reason }
+    let permanentName: String
+    let controller: String
+    let reason: String
+
+    enum CodingKeys: String, CodingKey {
+        case permanentName = "permanent_name"
+        case controller
+        case reason
+    }
+}
+
 struct BoardAnalysisResult: Codable {
     let originalEvent: GameEvent
     let cascade: [CascadeStep]
     let stackOrder: [String]
     let warnings: [String]
+    let didNotTrigger: [DidNotTrigger]
     let summary: String
     let plainEnglish: String
 
@@ -108,7 +122,9 @@ struct BoardAnalysisResult: Codable {
         case originalEvent = "original_event"
         case cascade
         case stackOrder = "stack_order"
-        case warnings, summary
+        case warnings
+        case didNotTrigger = "did_not_trigger"
+        case summary
         case plainEnglish = "plain_english"
     }
 }
