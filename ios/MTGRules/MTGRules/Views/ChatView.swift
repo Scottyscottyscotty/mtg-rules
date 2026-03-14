@@ -35,9 +35,13 @@ struct ChatView: View {
                         }
                         .padding()
                     }
-                    .onChange(of: vm.messages.count) {
+                    .onChange(of: vm.messages.count) { _, _ in
                         withAnimation {
-                            proxy.scrollTo(vm.messages.last?.id ?? "loading", anchor: .bottom)
+                            if let lastID = vm.messages.last?.id {
+                                proxy.scrollTo(lastID, anchor: .bottom)
+                            } else {
+                                proxy.scrollTo("loading", anchor: .bottom)
+                            }
                         }
                     }
                 }
@@ -130,18 +134,18 @@ struct ChatBubble: View {
                 .padding(12)
                 .background(isUser ? Color("AccentRed") : Color("InputBackground"))
                 .foregroundColor(.white)
-                .cornerRadius(16, corners: isUser
-                    ? [.topLeading, .topTrailing, .bottomLeading]
-                    : [.topLeading, .topTrailing, .bottomTrailing])
+                .selectiveCornerRadius(16, corners: isUser
+                    ? [.topLeft, .topRight, .bottomLeft]
+                    : [.topLeft, .topRight, .bottomRight])
 
             if !isUser { Spacer(minLength: 40) }
         }
     }
 }
 
-// Custom corner radius
+// Custom selective corner radius
 extension View {
-    func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
+    func selectiveCornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
         clipShape(RoundedCornerShape(radius: radius, corners: corners))
     }
 }
