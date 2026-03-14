@@ -124,6 +124,7 @@ def detect_triggers(
     """Check if a permanent's oracle text triggers from a game event."""
     triggers = []
     oracle_lower = oracle_text.lower()
+    seen_ability_texts = set()  # Deduplicate: one trigger per distinct ability
 
     for pattern, event_type, desc_template in TRIGGER_PATTERNS:
         if event.event_type != event_type:
@@ -136,6 +137,14 @@ def detect_triggers(
         if not _scope_matches(oracle_lower, pattern, event):
             continue
 
+        # Extract the ability text and deduplicate — multiple patterns
+        # can match the same ability (e.g., "whenever .* dies" and
+        # "whenever a creature dies" both match "whenever a creature dies")
+        ability_text = _extract_ability_text(oracle_text, match.start())
+        if ability_text in seen_ability_texts:
+            continue
+        seen_ability_texts.add(ability_text)
+
         # Determine what events this trigger produces
         resulting_events = _detect_produced_events(
             oracle_lower, permanent, event
@@ -144,7 +153,7 @@ def detect_triggers(
         trigger = DetectedTrigger(
             permanent_name=permanent.card_name,
             controller=permanent.effective_controller(),
-            trigger_text=_extract_ability_text(oracle_text, match.start()),
+            trigger_text=ability_text,
             caused_by=event,
             resulting_events=resulting_events,
         )
