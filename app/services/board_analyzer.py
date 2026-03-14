@@ -145,6 +145,7 @@ async def analyze_board_event(request: BoardAnalysisRequest) -> BoardAnalysisRes
 
     # Build summary
     summary = _build_board_summary(event, cascade, stack_order, warnings, board)
+    plain_english = _build_plain_english(event, cascade, stack_order, board)
 
     return BoardAnalysisResult(
         original_event=event,
@@ -152,6 +153,7 @@ async def analyze_board_event(request: BoardAnalysisRequest) -> BoardAnalysisRes
         stack_order=list(reversed(stack_order)),  # LIFO — last added resolves first
         warnings=warnings,
         summary=summary,
+        plain_english=plain_english,
     )
 
 
@@ -239,3 +241,176 @@ def _build_board_summary(
         parts.append(f"\nWarning: {w}")
 
     return "\n".join(parts)
+
+
+# Friendly names for event types
+_EVENT_DESCRIPTIONS = {
+    "cast_spell": "casts a spell",
+    "enters_battlefield": "enters the battlefield",
+    "leaves_battlefield": "leaves the battlefield",
+    "dies": "dies",
+    "draw_card": "draws a card",
+    "discard": "discards",
+    "damage_dealt": "deals damage",
+    "gain_life": "gains life",
+    "lose_life": "loses life",
+    "attacks": "attacks",
+    "blocks": "blocks",
+    "create_token": "creates a token",
+    "activate_ability": "activates an ability",
+    "triggered_ability": "triggers an ability",
+    "spell_resolves": "has a spell resolve",
+    "spell_countered": "has a spell countered",
+    "combat_damage": "deals combat damage",
+    "counter_placed": "has counters placed",
+    "counter_removed": "has counters removed",
+    "mill": "mills cards",
+    "upkeep": "begins their upkeep",
+    "draw_step": "begins their draw step",
+    "end_step": "begins the end step",
+}
+
+_EFFECT_DESCRIPTIONS = {
+    "draw_card": "draw",
+    "damage_dealt": "deal damage",
+    "gain_life": "gain life",
+    "lose_life": "lose life",
+    "create_token": "create a token",
+    "dies": "destroy something",
+    "discard": "discard",
+    "leaves_battlefield": "exile something",
+    "spell_countered": "counter a spell",
+    "counter_placed": "put counters on something",
+    "mill": "mill",
+}
+
+
+def _build_plain_english(
+    event: GameEvent,
+    cascade: list[CascadeStep],
+    stack_order: list[str],
+    board: BoardState,
+) -> str:
+    """Build a plain English walkthrough of what happens.
+
+    Written like you'd explain it to someone at the table:
+    "Okay so here's what happens..."
+    """
+    lines = []
+
+    # Opening — describe what kicked this off
+    event_desc = _EVENT_DESCRIPTIONS.get(event.event_type.value, event.event_type.value)
+    who = event.source_player or "A player"
+    what_card = f" ({event.source_card})" if event.source_card else ""
+    lines.append(f"Okay, so {who} {event_desc}{what_card}. Here's what happens:\n")
+
+    # Check if anything actually triggers
+    total_triggers = sum(len(s.triggers_fired) for s in cascade)
+    total_replacements = sum(len(s.replacements_applied) for s in cascade)
+
+    if total_triggers == 0 and total_replacements == 0:
+        lines.append(
+            "Nothing on the board cares about this. "
+            "It just happens normally — no triggers, no funny business."
+        )
+        return "\n".join(lines)
+
+    # Walk through replacements first (they happen before the event)
+    step_num = 1
+    has_replacements = False
+    for step in cascade:
+        if not step.replacements_applied:
+            continue
+        if not has_replacements:
+            lines.append("BEFORE it happens:")
+            has_replacements = True
+        for r in step.replacements_applied:
+            lines.append(
+                f"  {step_num}. Hold on — {r.permanent_name} "
+                f"({r.controller}'s) changes how this works. "
+                f"Instead of the normal thing, {r.replacement_text}"
+            )
+            step_num += 1
+
+        if len(step.replacements_applied) > 1:
+            affected = step.event.target_player or step.event.source_player or "the affected player"
+            lines.append(
+                f"\n  (Multiple things are trying to change this event. "
+                f"{affected} gets to pick which one applies first.)\n"
+            )
+
+    # Walk through triggers in the order they resolve (stack order is already reversed)
+    if total_triggers > 0:
+        lines.append("\nTHEN, a bunch of things trigger:\n")
+
+        # Group triggers by cascade step for narrative flow
+        trigger_num = 1
+        for step in cascade:
+            if not step.triggers_fired:
+                continue
+
+            step_event_desc = _EVENT_DESCRIPTIONS.get(
+                step.event.event_type.value, step.event.event_type.value
+            )
+
+            # If this isn't the first event, explain what caused this wave
+            if step.step_number > 1:
+                source = step.event.source_card or "that"
+                lines.append(
+                    f"\n  ...and because of {source}, even MORE things trigger:\n"
+                )
+
+            for trigger in step.triggers_fired:
+                # Describe the trigger in plain English
+                effect_parts = []
+                for resulting in trigger.resulting_events:
+                    desc = _EFFECT_DESCRIPTIONS.get(
+                        resulting.event_type.value, resulting.event_type.value
+                    )
+                    if resulting.amount:
+                        desc = f"{desc} ({resulting.amount})"
+                    effect_parts.append(desc)
+
+                effect_str = ""
+                if effect_parts:
+                    effect_str = f" This is going to {', '.join(effect_parts)}."
+
+                lines.append(
+                    f"  {trigger_num}. {trigger.controller}'s "
+                    f"{trigger.permanent_name} sees this and triggers.{effect_str}"
+                )
+                trigger_num += 1
+
+    # Explain resolution order
+    if total_triggers > 1:
+        lines.append("\nHOW IT RESOLVES:")
+        lines.append(
+            "All these triggers go on the stack. Remember, the stack is "
+            "last-in-first-out, so the LAST thing added resolves FIRST.\n"
+        )
+
+        # Explain APNAP in plain terms if multiplayer
+        if len(board.players) > 2:
+            active = board.active_player or board.players[0].name
+            lines.append(
+                f"Since this is multiplayer, {active}'s triggers go on the stack "
+                f"first (because they're the active player), then each other player "
+                f"in turn order. That means {active}'s triggers actually resolve "
+                f"LAST.\n"
+            )
+
+        reversed_stack = list(reversed(stack_order))
+        lines.append("So in order, here's what actually happens:")
+        for i, item in enumerate(reversed_stack, 1):
+            # Simplify the stack item
+            lines.append(f"  {i}. {item}")
+
+    # Closing — any chain reactions?
+    if len(cascade) > 1:
+        lines.append(
+            f"\nHeads up: this creates a chain reaction "
+            f"({len(cascade)} waves of triggers total). Each trigger's effect "
+            f"can cause MORE triggers, so pay attention to the order."
+        )
+
+    return "\n".join(lines)

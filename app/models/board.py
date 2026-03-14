@@ -151,3 +151,4 @@ class BoardAnalysisResult(BaseModel):
     stack_order: list[str] = []
     warnings: list[str] = []
     summary: str = ""
+    plain_english: str = ""

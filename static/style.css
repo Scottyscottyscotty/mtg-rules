@@ -331,6 +331,52 @@ select option {
     margin-top: 1rem;
 }
 
+/* View toggle */
+.view-toggle {
+    display: flex;
+    gap: 0;
+    margin-bottom: 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    width: fit-content;
+}
+
+.view-btn {
+    padding: 0.6rem 1.25rem;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.view-btn:hover {
+    background: rgba(233, 69, 96, 0.1);
+    color: var(--text);
+}
+
+.view-btn.active {
+    background: var(--accent);
+    color: white;
+}
+
+.board-view {
+    display: none;
+}
+
+.board-view.active {
+    display: block;
+}
+
+.plain-english-box {
+    font-size: 1rem;
+    line-height: 1.8;
+}
+
 /* Chat styles */
 .chat-container {
     display: flex;

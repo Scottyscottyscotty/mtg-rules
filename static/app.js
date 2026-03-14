@@ -370,6 +370,27 @@ runEventBtn.addEventListener('click', async () => {
 function renderBoardResult(result) {
     let html = '';
 
+    // View toggle
+    html += `<div class="view-toggle">
+        <button class="view-btn active" onclick="switchBoardView('plain')">Plain English</button>
+        <button class="view-btn" onclick="switchBoardView('technical')">Technical Details</button>
+    </div>`;
+
+    // Plain English view (shown by default)
+    html += `<div id="board-view-plain" class="board-view active">`;
+    html += `<div class="summary-box plain-english-box">${escapeHtml(result.plain_english)}</div>`;
+    if (result.warnings.length) {
+        html += '<div class="results-section" style="margin-top: 1rem;"><h2>Heads Up</h2><ul>';
+        result.warnings.forEach(w => {
+            html += `<li style="color: var(--warning);">${escapeHtml(w)}</li>`;
+        });
+        html += '</ul></div>';
+    }
+    html += '</div>';
+
+    // Technical view (hidden by default)
+    html += `<div id="board-view-technical" class="board-view">`;
+
     // Summary
     html += `<div class="summary-box">${escapeHtml(result.summary)}</div>`;
 
@@ -432,7 +453,21 @@ function renderBoardResult(result) {
         html += '</ul></div>';
     }
 
+    html += '</div>';
+
     boardResults.innerHTML = html;
+}
+
+function switchBoardView(view) {
+    document.querySelectorAll('.board-view').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.view-btn').forEach(el => el.classList.remove('active'));
+    document.getElementById(`board-view-${view}`).classList.add('active');
+    // Find the clicked button
+    document.querySelectorAll('.view-btn').forEach(btn => {
+        if (btn.textContent.toLowerCase().includes(view === 'plain' ? 'plain' : 'technical')) {
+            btn.classList.add('active');
+        }
+    });
 }
 
 // --- Rules Chat ---
