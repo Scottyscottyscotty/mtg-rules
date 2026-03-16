@@ -1,22 +1,23 @@
-"""Board state analyzer powered by Claude API.
+"""Board state analyzer — hybrid AI + deterministic rules engine.
 
-Given a board state (all players' permanents) and a game event,
-sends everything to Claude to determine:
-1. Which replacement effects modify the event
-2. Which triggered abilities fire
-3. What state-based actions occur (e.g., creatures dying from -2/-2)
-4. The full cascade of triggers causing more triggers
-5. APNAP stack ordering for multiplayer
-6. Plain English explanation
+Two-phase approach:
+  Phase 1 (AI): Claude reads oracle text and identifies what triggers,
+    what replacement effects apply, and what continuous effects exist.
+    This is the part that requires language understanding.
 
-This replaces the regex-based approach, which couldn't handle implicit
-effects like creatures dying from toughness reduction, continuous
-effects, or complex card interactions.
+  Phase 2 (Deterministic): Code handles the mechanical rules:
+    - State-based actions (rule 704): what dies from toughness reduction
+    - Layer ordering (rule 613): continuous effects in correct order
+    - APNAP stack ordering (rule 101.4): whose triggers resolve when
+    - Stack resolution (rule 405): LIFO
+
+Claude focuses on WHAT happens. The code ensures the ORDER is correct.
 """
 
 import asyncio
 import json
 import os
+import re
 
 import anthropic
 
@@ -33,38 +34,49 @@ from app.models.board import (
     ReplacementEffect,
 )
 from app.models.card import Card
+from app.services.game_rules import (
+    check_sbas,
+    SBAResult,
+    sort_effects_by_layer,
+    LayerEffect,
+    order_triggers_apnap,
+    StackItem,
+)
+from app.services.game_rules.layers import classify_layer, get_layer_name
+from app.services.game_rules.stack import describe_stack, resolution_order
 from app.services.scryfall import fetch_card
 
-BOARD_ANALYSIS_SYSTEM = """\
-You are an expert Magic: The Gathering judge analyzing a board state interaction. \
-You have perfect knowledge of the comprehensive rules, including:
-- The stack (rule 405) and LIFO resolution
-- Priority and APNAP ordering (rule 101.4) for multiplayer
-- State-based actions (rule 704) — creatures with 0 or less toughness die, etc.
-- Triggered abilities (rule 603) — "when", "whenever", "at"
-- Replacement effects (rule 614) — "if ... would ... instead"
-- Continuous effects and the layer system (rule 613)
-- How sacrifice works (the permanent dies after being sacrificed)
+# ---------------------------------------------------------------------------
+# Phase 1 prompt: Claude identifies triggers, effects, and interactions.
+# We explicitly tell it NOT to worry about ordering — the code handles that.
+# ---------------------------------------------------------------------------
 
-CRITICAL: You are provided with EXACT card data from Scryfall (the official MTG database). \
-Use ONLY the provided card stats (name, type, oracle text, power/toughness, mana cost). \
-Do NOT rely on your memory for card details — your training data may have incorrect or \
-outdated card information. If a card's data is not provided, say so in warnings rather \
-than guessing.
+PHASE1_SYSTEM = """\
+You are an expert Magic: The Gathering judge. Your job is to READ card oracle \
+text and IDENTIFY what happens — which abilities trigger, which replacement \
+effects apply, and what continuous effects are active.
 
-You must trace through the COMPLETE chain of events, including:
-- Effects that cause state-based actions (e.g., -2/-2 killing creatures)
-- Triggers that fire from those state-based actions
-- Cascading triggers (triggers causing more triggers)
-- Which player controls each trigger for APNAP ordering
-- Use the ACTUAL power/toughness values provided to determine what dies
+You do NOT need to worry about:
+- APNAP ordering (the code handles stack ordering)
+- Layer ordering for continuous effects (the code handles that)
+- State-based action checks for toughness (the code checks P/T math)
 
-Be thorough. Walk through every single thing that happens in order.\
+You DO need to:
+- Read each card's oracle text carefully and determine if it triggers from the event
+- Identify ALL replacement effects that would modify events
+- Identify continuous effects (like "creatures you control get +1/+1")
+- Identify P/T modifications from continuous effects (e.g., Massacre Wurm's -2/-2)
+- Explain WHY each ability does or does not trigger (the rules distinction)
+- Note any edge cases or ambiguities
+
+CRITICAL: You are provided with EXACT card data from Scryfall. Use ONLY the \
+provided oracle text — do NOT rely on your training data for card details.\
 """
 
-ANALYSIS_PROMPT_TEMPLATE = """\
-Analyze this board state and event. Trace through EVERYTHING that happens, \
-step by step, including state-based actions, cascading triggers, and APNAP ordering.
+PHASE1_PROMPT = """\
+Analyze this board state and event. Identify ALL triggers, replacement effects, \
+and continuous effects — but do NOT worry about ordering (the code handles APNAP \
+and layer ordering).
 
 ## Board State
 
@@ -74,92 +86,128 @@ step by step, including state-based actions, cascading triggers, and APNAP order
 
 {event_description}
 
-## Card Data (from Scryfall — the ONLY source of truth for card stats)
+## Card Data (from Scryfall — the ONLY source of truth)
 
 {card_texts}
 
-IMPORTANT: The card data above is fetched LIVE from Scryfall and is authoritative. \
-Use ONLY these stats (power/toughness, oracle text, type line) for your analysis. \
-Do NOT use any card information from your training data — it may be wrong.
+## Pre-computed State-Based Actions
+
+The code has already checked these SBAs deterministically:
+
+{sba_results}
 
 ## Instructions
 
-Respond with a JSON object matching this exact structure. Do NOT include anything \
-outside the JSON object — no markdown fences, no commentary.
+Respond with a JSON object. Do NOT include anything outside the JSON — no markdown fences.
 
 {{
-  "cascade": [
+  "triggers": [
     {{
-      "step_number": 1,
-      "event": {{
-        "event_type": "<one of: cast_spell, enters_battlefield, dies, sacrifice, draw_card, damage_dealt, gain_life, lose_life, discard, attacks, blocks, leaves_battlefield, create_token, upkeep, end_step, activate_ability, triggered_ability, spell_resolves, spell_countered, combat_damage, counter_placed, counter_removed, mill, draw_step>",
-        "source_card": "<card name or null>",
-        "source_player": "<player name or null>",
-        "target_card": "<card name or null>",
-        "target_player": "<player name or null>",
-        "details": "<what's happening>",
-        "amount": null
-      }},
-      "triggers_fired": [
-        {{
-          "permanent_name": "<card that triggers>",
-          "controller": "<who controls it>",
-          "trigger_text": "<the relevant ability text>",
-          "caused_by": {{
-            "event_type": "<event type>",
-            "source_card": null,
-            "source_player": null,
-            "details": "<brief description>"
-          }},
-          "resulting_events": []
-        }}
-      ],
-      "replacements_applied": [
-        {{
-          "permanent_name": "<card>",
-          "controller": "<player>",
-          "replacement_text": "<the replacement text>",
-          "original_event": {{
-            "event_type": "<event type>",
-            "details": "<what was going to happen>"
-          }}
-        }}
-      ],
-      "notes": ["<explanation of what happens in this step>"]
+      "permanent_name": "<card that triggers>",
+      "controller": "<who controls it>",
+      "trigger_text": "<the relevant triggered ability text from oracle>",
+      "trigger_condition": "<what event/condition caused this to trigger>",
+      "resulting_effects": "<what the trigger does when it resolves>",
+      "caused_by_event_type": "<event_type enum value>"
     }}
   ],
-  "stack_order": ["<item 1 (resolves first)>", "<item 2>"],
-  "warnings": ["<any rules edge cases or ambiguities>"],
+  "replacement_effects": [
+    {{
+      "permanent_name": "<card with replacement>",
+      "controller": "<who controls it>",
+      "replacement_text": "<the replacement ability text>",
+      "what_it_replaces": "<what event is being replaced>",
+      "what_happens_instead": "<the modified outcome>"
+    }}
+  ],
+  "continuous_effects": [
+    {{
+      "permanent_name": "<card producing the effect>",
+      "controller": "<who controls it>",
+      "effect_text": "<the continuous effect text>",
+      "pt_modification": [0, 0],
+      "affects": "<what it affects, e.g., 'all creatures opponents control'>"
+    }}
+  ],
   "did_not_trigger": [
     {{
       "permanent_name": "<card that did NOT trigger>",
       "controller": "<who controls it>",
-      "reason": "<clear explanation of WHY it didn't trigger, citing the specific rules distinction — e.g., '-2/-2 is a continuous effect applied in layer 7c, NOT -1/-1 counters, so abilities that trigger from counters being placed do not fire'>"
+      "reason": "<clear explanation of WHY it didn't trigger — cite the specific rules distinction>"
     }}
   ],
-  "summary": "<technical step-by-step summary>",
-  "plain_english": "<casual, friendly explanation written like you're explaining it to someone at the table. Start with 'Okay, so here\\'s what happens...' and walk through each thing that occurs in plain language. Mention which players are affected and why. Use a conversational tone. IMPORTANT: After explaining what DOES happen, add a section starting with 'What does NOT trigger:' that explains which permanents on the board might LOOK like they should trigger but don't, and why. This is crucial — players often confuse similar-sounding mechanics (e.g., -2/-2 continuous effects vs -1/-1 counters, losing life vs taking damage, sacrifice vs destroy). Call out these distinctions clearly.>"
+  "cascade_events": [
+    "<describe each new event that results from triggers resolving, so the code can check for further SBAs and triggers>"
+  ],
+  "warnings": ["<any edge cases, ambiguities, or missing card data>"]
 }}
 
-Important:
-- Include ALL cascade steps, including state-based actions causing deaths
-- event_type values must be exactly one of the enum values listed above
-- Every trigger must reference which event caused it
-- Stack order should be listed in resolution order (last in, first out)
-- For multiplayer, active player's triggers go on stack first (resolve last per APNAP)
-- The plain_english field should be thorough but readable — like a judge explaining at the table
-- If a card's oracle text wasn't provided (not found on Scryfall), mention it in warnings
-- CRITICAL: For EVERY permanent on the board that has triggered abilities but did NOT trigger from this event, include it in "did_not_trigger" with a clear explanation of WHY. This helps players understand common rules misconceptions like:
-  * -X/-X continuous effects vs -1/-1 counters (different mechanics)
-  * Losing life vs being dealt damage (different events)
-  * Sacrifice vs destroy (different actions, though both cause dying)
-  * "Leaves the battlefield" vs "dies" (dies is specific to going to graveyard)
-  * "Cast" vs "enters the battlefield" (casting puts on stack, ETB is when it resolves)\
+CRITICAL rules for trigger identification:
+- "When/Whenever/At" = triggered ability. Check if the condition matches the event.
+- -X/-X from a continuous effect is NOT the same as -1/-1 counters
+- Losing life is NOT the same as being dealt damage
+- Sacrifice is NOT the same as destroy (both cause "dying" though)
+- "Leaves the battlefield" includes dying; "dies" is specifically going to graveyard
+- "Cast" triggers happen when spell goes on stack; ETB triggers when it resolves
+- For EACH permanent with triggered abilities that didn't fire, explain WHY in did_not_trigger\
+"""
+
+# ---------------------------------------------------------------------------
+# Phase 2 prompt: after deterministic processing, Claude writes the summary
+# ---------------------------------------------------------------------------
+
+SUMMARY_SYSTEM = """\
+You are an expert Magic: The Gathering judge writing a clear explanation of \
+what happens during a game interaction. You will be given the full resolved \
+sequence of events (triggers, SBAs, stack order) that was computed by a rules \
+engine. Your job is to explain it clearly — both technically and in plain English.\
+"""
+
+SUMMARY_PROMPT = """\
+Write a summary of this resolved board interaction. You'll get the full \
+sequence that was computed by the rules engine.
+
+## Original Event
+{event_description}
+
+## Board State
+{board_description}
+
+## Resolved Sequence
+
+### State-Based Actions (computed deterministically)
+{sba_section}
+
+### Triggers Identified (from oracle text analysis)
+{triggers_section}
+
+### Stack Order (APNAP-ordered by rules engine)
+{stack_section}
+
+### Cards That Did NOT Trigger
+{did_not_trigger_section}
+
+### Warnings
+{warnings_section}
+
+## Instructions
+
+Respond with JSON:
+{{
+  "summary": "<technical step-by-step summary>",
+  "plain_english": "<casual, friendly explanation. Start with 'Okay, so here\\'s what happens...' and walk through each thing in plain language. After explaining what DOES happen, add 'What does NOT trigger:' explaining which permanents might LOOK like they should trigger but don't, and why. Call out common confusions (e.g., -2/-2 effects vs counters, life loss vs damage).>"
+}}\
 """
 
 
 async def analyze_board_event(request: BoardAnalysisRequest) -> BoardAnalysisResult:
-    """Analyze what happens when an event occurs on a given board state."""
+    """Analyze what happens when an event occurs on a given board state.
+
+    Two-phase hybrid approach:
+      Phase 1: Claude identifies triggers, replacements, continuous effects
+      Phase 2: Deterministic code orders everything (SBAs, layers, APNAP)
+      Final: Claude writes the human-readable summary
+    """
     board = request.board
     event = request.event
     warnings: list[str] = []
@@ -171,54 +219,168 @@ async def analyze_board_event(request: BoardAnalysisRequest) -> BoardAnalysisRes
             "Set it in your .env file to use the board analyzer."
         )
 
-    # Fetch full card data for all permanents on the board
+    # ── Fetch card data from Scryfall ─────────────────────────────────────
     card_data = await _fetch_all_cards(board, warnings)
 
-    # Build the prompt
+    # ── Phase 1a: Deterministic SBA check ─────────────────────────────────
+    # Check what dies / what SBAs apply BEFORE asking Claude.
+    # This gives Claude concrete facts ("these creatures die") rather than
+    # making it do the math.
+    sba_results = check_sbas(board, card_data)
+    sba_text = _format_sba_results(sba_results)
+
+    # ── Phase 1b: Claude identifies triggers and effects ──────────────────
     board_desc = _describe_board(board)
     event_desc = _describe_event(event)
     cards_desc = _describe_cards(card_data)
 
-    prompt = ANALYSIS_PROMPT_TEMPLATE.format(
+    prompt = PHASE1_PROMPT.format(
         board_description=board_desc,
         event_description=event_desc,
         card_texts=cards_desc,
+        sba_results=sba_text,
     )
 
-    # Call Claude
     client = anthropic.AsyncAnthropic(api_key=api_key)
     response = await client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=4000,
-        system=BOARD_ANALYSIS_SYSTEM,
+        system=PHASE1_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )
 
     raw_text = response.content[0].text
+    phase1 = _parse_json_response(raw_text)
 
-    # Parse the JSON response
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError:
-        # Try to extract JSON from markdown fences
-        import re
-        json_match = re.search(r"```(?:json)?\s*(.*?)```", raw_text, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group(1))
-        else:
-            # Return a readable error with the raw response
-            return BoardAnalysisResult(
-                original_event=event,
-                cascade=[],
-                stack_order=[],
-                warnings=["Failed to parse Claude's response. Raw output included in summary."],
-                summary=raw_text,
-                plain_english=raw_text,
-            )
+    if phase1 is None:
+        return BoardAnalysisResult(
+            original_event=event,
+            warnings=["Failed to parse Phase 1 response. Raw output in summary."],
+            summary=raw_text,
+            plain_english=raw_text,
+        )
 
-    # Convert the JSON into our typed models
-    return _parse_analysis_response(data, event, warnings)
+    # ── Phase 2: Deterministic ordering ───────────────────────────────────
 
+    # 2a. Classify continuous effects by layer
+    layer_effects = []
+    for i, ce in enumerate(phase1.get("continuous_effects", [])):
+        effect = LayerEffect(
+            source_card=ce.get("permanent_name", "Unknown"),
+            controller=ce.get("controller", "Unknown"),
+            effect_text=ce.get("effect_text", ""),
+            layer=classify_layer(ce.get("effect_text", "")),
+            timestamp=i,  # use position as proxy for timestamp
+        )
+        layer_effects.append(effect)
+
+    sorted_effects = sort_effects_by_layer(layer_effects)
+
+    # 2b. Check if continuous effects cause additional SBAs
+    # (e.g., -2/-2 killing creatures that Claude identified)
+    pt_mods: dict[str, tuple[int, int]] = {}
+    for ce in phase1.get("continuous_effects", []):
+        pt_mod = ce.get("pt_modification", [0, 0])
+        if pt_mod and (pt_mod[0] != 0 or pt_mod[1] != 0):
+            affects = ce.get("affects", "")
+            # Apply this modification to creatures it affects
+            # For now, apply to all opponent creatures (Claude told us who it affects)
+            for player in board.players:
+                for perm in player.permanents:
+                    card = card_data.get(perm.card_name)
+                    if card and "Creature" in card.type_line:
+                        # Check if this creature is affected
+                        if _is_affected_by(
+                            perm, player.name, ce, board
+                        ):
+                            existing = pt_mods.get(perm.card_name, (0, 0))
+                            pt_mods[perm.card_name] = (
+                                existing[0] + pt_mod[0],
+                                existing[1] + pt_mod[1],
+                            )
+
+    # Re-check SBAs with continuous effect modifications applied
+    if pt_mods:
+        sba_with_effects = check_sbas(board, card_data, pt_mods)
+        # Merge new SBAs (avoid duplicates)
+        existing_descs = {s.description for s in sba_results}
+        for sba in sba_with_effects:
+            if sba.description not in existing_descs:
+                sba_results.append(sba)
+
+    # 2c. Order triggers by APNAP
+    triggers_raw = phase1.get("triggers", [])
+    stack_items = [
+        StackItem(
+            description=t.get("resulting_effects", ""),
+            controller=t.get("controller", "Unknown"),
+            source_card=t.get("permanent_name", "Unknown"),
+            trigger_text=t.get("trigger_text", ""),
+        )
+        for t in triggers_raw
+    ]
+
+    active_player = board.active_player or (
+        board.players[0].name if board.players else "Unknown"
+    )
+    player_order = [p.name for p in board.players]
+
+    ordered_stack = order_triggers_apnap(stack_items, active_player, player_order)
+    stack_descriptions = describe_stack(ordered_stack)
+
+    # ── Build cascade steps ───────────────────────────────────────────────
+    cascade = _build_cascade(event, sba_results, triggers_raw, sorted_effects)
+
+    # ── Parse did_not_trigger from Claude's response ──────────────────────
+    did_not_trigger = [
+        DidNotTrigger(
+            permanent_name=d.get("permanent_name", "Unknown"),
+            controller=d.get("controller", "Unknown"),
+            reason=d.get("reason", ""),
+        )
+        for d in phase1.get("did_not_trigger", [])
+    ]
+
+    # Merge warnings
+    claude_warnings = phase1.get("warnings", [])
+    all_warnings = warnings + claude_warnings
+
+    # ── Final phase: Claude writes the human-readable summary ─────────────
+    summary_prompt = SUMMARY_PROMPT.format(
+        event_description=event_desc,
+        board_description=board_desc,
+        sba_section=sba_text if sba_results else "(none)",
+        triggers_section=_format_triggers(triggers_raw),
+        stack_section="\n".join(stack_descriptions) if stack_descriptions else "(empty stack)",
+        did_not_trigger_section=_format_did_not_trigger(did_not_trigger),
+        warnings_section="\n".join(f"- {w}" for w in all_warnings) if all_warnings else "(none)",
+    )
+
+    summary_response = await client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=2000,
+        system=SUMMARY_SYSTEM,
+        messages=[{"role": "user", "content": summary_prompt}],
+    )
+
+    summary_data = _parse_json_response(summary_response.content[0].text)
+    summary = (summary_data or {}).get("summary", "")
+    plain_english = (summary_data or {}).get("plain_english", "")
+
+    return BoardAnalysisResult(
+        original_event=event,
+        cascade=cascade,
+        stack_order=stack_descriptions,
+        warnings=all_warnings,
+        did_not_trigger=did_not_trigger,
+        summary=summary,
+        plain_english=plain_english,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Helpers: formatting
+# ---------------------------------------------------------------------------
 
 def _describe_board(board: BoardState) -> str:
     """Build a human-readable board description for the prompt."""
@@ -235,7 +397,11 @@ def _describe_board(board: BoardState) -> str:
                 if perm.controller and perm.controller != perm.owner:
                     ctrl = f" (controlled by {perm.controller})"
                 tapped = " [TAPPED]" if perm.tapped else ""
-                lines.append(f"  - {perm.card_name}{ctrl}{tapped}")
+                counters = ""
+                if perm.counters:
+                    parts = [f"{v} {k}" for k, v in perm.counters.items()]
+                    counters = f" [{', '.join(parts)}]"
+                lines.append(f"  - {perm.card_name}{ctrl}{tapped}{counters}")
         else:
             lines.append("  - (no permanents)")
         lines.append("")
@@ -262,7 +428,7 @@ def _describe_event(event: GameEvent) -> str:
 
 
 def _describe_cards(card_data: dict[str, Card]) -> str:
-    """Format full card data for the prompt — type, P/T, oracle text, everything."""
+    """Format full card data for the prompt."""
     if not card_data:
         return "(No card data was retrieved — Scryfall lookups may have failed)"
 
@@ -282,6 +448,198 @@ def _describe_cards(card_data: dict[str, Card]) -> str:
     return "\n".join(lines)
 
 
+def _format_sba_results(results: list[SBAResult]) -> str:
+    """Format SBA results for inclusion in the prompt."""
+    if not results:
+        return "(No state-based actions apply at this time)"
+
+    lines = []
+    for sba in results:
+        lines.append(f"- [{sba.rule}] {sba.description}")
+    return "\n".join(lines)
+
+
+def _format_triggers(triggers: list[dict]) -> str:
+    """Format identified triggers for the summary prompt."""
+    if not triggers:
+        return "(No triggers fired)"
+
+    lines = []
+    for t in triggers:
+        card = t.get("permanent_name", "Unknown")
+        controller = t.get("controller", "Unknown")
+        text = t.get("trigger_text", "")
+        effect = t.get("resulting_effects", "")
+        lines.append(f"- {card} ({controller}): \"{text}\" -> {effect}")
+    return "\n".join(lines)
+
+
+def _format_did_not_trigger(items: list[DidNotTrigger]) -> str:
+    """Format did-not-trigger items for the summary prompt."""
+    if not items:
+        return "(All permanents with triggered abilities either triggered or have no relevant triggers)"
+
+    lines = []
+    for item in items:
+        lines.append(f"- {item.permanent_name} ({item.controller}): {item.reason}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Helpers: building cascade from deterministic + AI results
+# ---------------------------------------------------------------------------
+
+def _build_cascade(
+    original_event: GameEvent,
+    sbas: list[SBAResult],
+    triggers: list[dict],
+    layer_effects: list[LayerEffect],
+) -> list[CascadeStep]:
+    """Build the cascade sequence from SBAs, triggers, and layer effects."""
+    steps: list[CascadeStep] = []
+    step_num = 1
+
+    # Step 1: The original event
+    steps.append(CascadeStep(
+        step_number=step_num,
+        event=original_event,
+        triggers_fired=[],
+        replacements_applied=[],
+        notes=[f"Event: {original_event.details or original_event.event_type.value}"],
+    ))
+    step_num += 1
+
+    # Step 2: Layer effects apply (if any)
+    if layer_effects:
+        layer_notes = []
+        for effect in layer_effects:
+            layer_name = get_layer_name(effect.layer)
+            layer_notes.append(
+                f"{effect.source_card}'s effect applies in {layer_name}: "
+                f"{effect.effect_text}"
+            )
+        steps.append(CascadeStep(
+            step_number=step_num,
+            event=GameEvent(
+                event_type=EventType.TRIGGERED_ABILITY,
+                details="Continuous effects applied in layer order",
+            ),
+            notes=layer_notes,
+        ))
+        step_num += 1
+
+    # Step 3: State-based actions
+    if sbas:
+        for sba in sbas:
+            sba_events = sba.events or []
+            sba_triggers: list[DetectedTrigger] = []
+
+            # Find triggers that were caused by this SBA
+            for t in triggers:
+                caused_by = t.get("caused_by_event_type", "")
+                if caused_by in ("dies", "lose_life"):
+                    # Check if this trigger relates to this SBA
+                    for sba_event in sba_events:
+                        if (sba_event.source_card and
+                                t.get("trigger_condition", "").lower().find(
+                                    sba_event.source_card.lower()) >= 0):
+                            sba_triggers.append(DetectedTrigger(
+                                permanent_name=t.get("permanent_name", "Unknown"),
+                                controller=t.get("controller", "Unknown"),
+                                trigger_text=t.get("trigger_text", ""),
+                                caused_by=sba_event,
+                            ))
+
+            steps.append(CascadeStep(
+                step_number=step_num,
+                event=sba_events[0] if sba_events else GameEvent(
+                    event_type=EventType.DIES,
+                    details=sba.description,
+                ),
+                triggers_fired=sba_triggers,
+                notes=[f"[{sba.rule}] {sba.description}"],
+            ))
+            step_num += 1
+
+    # Remaining triggers not tied to SBAs
+    sba_trigger_cards = set()
+    for step in steps:
+        for t in step.triggers_fired:
+            sba_trigger_cards.add(t.permanent_name)
+
+    remaining = [
+        t for t in triggers
+        if t.get("permanent_name", "") not in sba_trigger_cards
+    ]
+
+    if remaining:
+        for t in remaining:
+            caused_by_type = t.get("caused_by_event_type", "triggered_ability")
+            try:
+                evt_type = EventType(caused_by_type)
+            except ValueError:
+                evt_type = EventType.TRIGGERED_ABILITY
+
+            steps.append(CascadeStep(
+                step_number=step_num,
+                event=GameEvent(
+                    event_type=EventType.TRIGGERED_ABILITY,
+                    source_card=t.get("permanent_name"),
+                    details=t.get("resulting_effects", ""),
+                ),
+                triggers_fired=[DetectedTrigger(
+                    permanent_name=t.get("permanent_name", "Unknown"),
+                    controller=t.get("controller", "Unknown"),
+                    trigger_text=t.get("trigger_text", ""),
+                    caused_by=GameEvent(
+                        event_type=evt_type,
+                        details=t.get("trigger_condition", ""),
+                    ),
+                )],
+                notes=[t.get("resulting_effects", "")],
+            ))
+            step_num += 1
+
+    return steps
+
+
+def _is_affected_by(
+    perm: "PermanentOnBoard",
+    player_name: str,
+    continuous_effect: dict,
+    board: BoardState,
+) -> bool:
+    """Heuristic: does a continuous effect affect this permanent?
+
+    Uses keywords in the 'affects' field to determine scope.
+    """
+    affects = continuous_effect.get("affects", "").lower()
+    effect_controller = continuous_effect.get("controller", "")
+    source_card = continuous_effect.get("permanent_name", "")
+
+    # Don't affect self (usually)
+    if perm.card_name == source_card:
+        return False
+
+    if "all creatures" in affects:
+        return True
+    if "each creature" in affects:
+        return True
+    if "creatures opponents control" in affects or "opponent" in affects:
+        return player_name != effect_controller
+    if "creatures you control" in affects:
+        return player_name == effect_controller
+    if "other creatures" in affects:
+        return perm.card_name != source_card
+
+    # Default: assume it affects the permanent (Claude told us it's relevant)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Helpers: data fetching and JSON parsing
+# ---------------------------------------------------------------------------
+
 async def _fetch_all_cards(
     board: BoardState, warnings: list[str]
 ) -> dict[str, Card]:
@@ -291,9 +649,6 @@ async def _fetch_all_cards(
         for permanent in player.permanents:
             card_names.add(permanent.card_name)
 
-    # Fetch all cards concurrently (Scryfall cache handles rate limiting
-    # for already-cached cards; new cards go through fetch_card which
-    # hits the API one at a time)
     async def _fetch_one(name: str) -> tuple[str, Card | None]:
         card = await fetch_card(name)
         return name, card
@@ -325,90 +680,15 @@ async def _fetch_all_cards(
     return cards
 
 
-def _parse_analysis_response(
-    data: dict,
-    original_event: GameEvent,
-    warnings: list[str],
-) -> BoardAnalysisResult:
-    """Convert Claude's JSON response into typed BoardAnalysisResult."""
-    cascade = []
-    for step_data in data.get("cascade", []):
-        step = CascadeStep(
-            step_number=step_data.get("step_number", 0),
-            event=_parse_event(step_data.get("event", {})),
-            triggers_fired=[
-                _parse_trigger(t) for t in step_data.get("triggers_fired", [])
-            ],
-            replacements_applied=[
-                _parse_replacement(r)
-                for r in step_data.get("replacements_applied", [])
-            ],
-            notes=step_data.get("notes", []),
-        )
-        cascade.append(step)
-
-    # Merge any warnings from Claude with our fetch warnings
-    claude_warnings = data.get("warnings", [])
-    all_warnings = warnings + claude_warnings
-
-    # Parse "did not trigger" explanations
-    did_not_trigger = [
-        DidNotTrigger(
-            permanent_name=d.get("permanent_name", "Unknown"),
-            controller=d.get("controller", "Unknown"),
-            reason=d.get("reason", ""),
-        )
-        for d in data.get("did_not_trigger", [])
-    ]
-
-    return BoardAnalysisResult(
-        original_event=original_event,
-        cascade=cascade,
-        stack_order=data.get("stack_order", []),
-        warnings=all_warnings,
-        did_not_trigger=did_not_trigger,
-        summary=data.get("summary", ""),
-        plain_english=data.get("plain_english", ""),
-    )
-
-
-def _parse_event(data: dict) -> GameEvent:
-    """Parse a GameEvent from Claude's JSON."""
-    event_type_str = data.get("event_type", "triggered_ability")
+def _parse_json_response(raw_text: str) -> dict | None:
+    """Parse JSON from Claude's response, handling markdown fences."""
     try:
-        event_type = EventType(event_type_str)
-    except ValueError:
-        event_type = EventType.TRIGGERED_ABILITY
-
-    return GameEvent(
-        event_type=event_type,
-        source_card=data.get("source_card"),
-        source_player=data.get("source_player"),
-        target_card=data.get("target_card"),
-        target_player=data.get("target_player"),
-        details=data.get("details", ""),
-        amount=data.get("amount"),
-    )
-
-
-def _parse_trigger(data: dict) -> DetectedTrigger:
-    """Parse a DetectedTrigger from Claude's JSON."""
-    return DetectedTrigger(
-        permanent_name=data.get("permanent_name", "Unknown"),
-        controller=data.get("controller", "Unknown"),
-        trigger_text=data.get("trigger_text", ""),
-        caused_by=_parse_event(data.get("caused_by", {})),
-        resulting_events=[
-            _parse_event(e) for e in data.get("resulting_events", [])
-        ],
-    )
-
-
-def _parse_replacement(data: dict) -> ReplacementEffect:
-    """Parse a ReplacementEffect from Claude's JSON."""
-    return ReplacementEffect(
-        permanent_name=data.get("permanent_name", "Unknown"),
-        controller=data.get("controller", "Unknown"),
-        replacement_text=data.get("replacement_text", ""),
-        original_event=_parse_event(data.get("original_event", {})),
-    )
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        json_match = re.search(r"```(?:json)?\s*(.*?)```", raw_text, re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                return None
+        return None
