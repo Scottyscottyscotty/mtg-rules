@@ -9,7 +9,7 @@ from app.models.board import (
     CombatSimResult,
     CombatDamageEvent,
 )
-from app.services.board_analyzer import analyze_board_event
+from app.services.analyzer import analyze_board
 from app.services.combat_simulator import simulate_combat
 
 router = APIRouter(prefix="/api/board", tags=["board"])
@@ -34,7 +34,7 @@ async def analyze(request: BoardAnalysisRequest):
             detail="Maximum 6 players supported.",
         )
 
-    result = await analyze_board_event(request)
+    result = await analyze_board(request)
     return result
 
 

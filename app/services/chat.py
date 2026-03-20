@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
+from app.services.card_registry import card_registry
 from app.services.rules_engine import rules_engine
-from app.services.scryfall import fetch_card
 
 SYSTEM_PROMPT = """You are an expert Magic: The Gathering rules advisor. You have \
 deep knowledge of the comprehensive rules, card interactions, the stack, priority, \
@@ -161,7 +161,7 @@ async def _build_context(question: str) -> str:
     # 3. Try to find card names in the question and fetch their data
     card_names = _extract_potential_card_names(question)
     for name in card_names[:3]:
-        card = await fetch_card(name)
+        card = await card_registry.get_card(name)
         if card:
             card_info = f"Card: {card.name}\n"
             card_info += f"  Type: {card.type_line}\n"

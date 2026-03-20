@@ -5,8 +5,6 @@ combat engine (game_rules.combat). Fetches card data from Scryfall
 to get accurate P/T and keywords.
 """
 
-import asyncio
-
 from app.models.board import (
     CombatSimRequest,
     CombatSimResult,
@@ -22,7 +20,7 @@ from app.services.game_rules.combat import (
     check_menace,
     resolve_combat,
 )
-from app.services.scryfall import fetch_card
+from app.services.card_registry import card_registry
 
 
 async def simulate_combat(request: CombatSimRequest) -> CombatSimResult:
@@ -34,8 +32,8 @@ async def simulate_combat(request: CombatSimRequest) -> CombatSimResult:
         for blocker in assignment.blockers:
             card_names.add(blocker.card_name)
 
-    # Fetch card data concurrently
-    card_data = await _fetch_cards(card_names)
+    # Fetch card data via CardRegistry
+    card_data = await card_registry.get_cards(list(card_names))
 
     # Build combat creatures
     warnings: list[str] = []
@@ -162,13 +160,3 @@ def _build_creature(
     )
 
 
-async def _fetch_cards(card_names: set[str]) -> dict[str, Card]:
-    """Fetch card data for all cards concurrently."""
-    async def _fetch_one(name: str) -> tuple[str, Card | None]:
-        card = await fetch_card(name)
-        return name, card
-
-    results = await asyncio.gather(
-        *[_fetch_one(name) for name in card_names]
-    )
-    return {name: card for name, card in results if card}

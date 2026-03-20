@@ -3,8 +3,8 @@
 from fastapi import APIRouter, HTTPException
 
 from app.models.card import InteractionQuery, InteractionResult
-from app.services.interaction_resolver import analyze_interaction
-from app.services.scryfall import fetch_card
+from app.services.analyzer import analyze_interaction
+from app.services.card_registry import card_registry
 
 router = APIRouter(prefix="/api/interactions", tags=["interactions"])
 
@@ -28,14 +28,16 @@ async def analyze(query: InteractionQuery):
             detail="Maximum 6 cards per interaction query.",
         )
 
+    card_data = await card_registry.get_cards(query.card_names)
+
     cards = []
     for name in query.card_names:
-        card = await fetch_card(name)
+        card = card_data.get(name)
         if not card:
             raise HTTPException(status_code=404, detail=f"Card not found: {name}")
         cards.append(card)
 
-    result = analyze_interaction(cards)
+    result = await analyze_interaction(cards)
 
     # Filter by format if specified
     if query.format and query.format != "all":
