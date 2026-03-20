@@ -1,0 +1,72 @@
+{
+  "name": "City on Fire listed in did_not_trigger",
+  "description": "City on Fire is a replacement effect only (no triggered abilities). Claude incorrectly lists it in did_not_trigger, implying it has a trigger that didn't fire.",
+  "board": {
+    "players": [
+      {
+        "name": "Alice",
+        "life": 20,
+        "permanents": [
+          {"card_name": "City on Fire", "owner": "Alice"},
+          {"card_name": "Goblin Guide", "owner": "Alice"}
+        ]
+      },
+      {
+        "name": "Bob",
+        "life": 20,
+        "permanents": []
+      }
+    ],
+    "active_player": "Alice"
+  },
+  "card_data": {
+    "City on Fire": {
+      "name": "City on Fire",
+      "type_line": "Enchantment",
+      "oracle_text": "Convoke\nIf a source you control would deal damage to a permanent or player, it deals triple that damage to that permanent or player instead."
+    },
+    "Goblin Guide": {
+      "name": "Goblin Guide",
+      "type_line": "Creature — Goblin Scout",
+      "oracle_text": "Haste\nWhenever Goblin Guide attacks, defending player reveals the top card of their library. If it's a land card, that player puts it into their hand.",
+      "power": "2",
+      "toughness": "2",
+      "keywords": ["Haste"]
+    }
+  },
+  "event": {
+    "event_type": "combat_damage",
+    "source_card": "Goblin Guide",
+    "source_player": "Alice",
+    "target_player": "Bob",
+    "amount": 2
+  },
+  "claude_phase1": {
+    "triggers": [],
+    "replacement_effects": [
+      {
+        "permanent_name": "City on Fire",
+        "controller": "Alice",
+        "replacement_text": "If a source you control would deal damage, it deals triple that damage instead.",
+        "what_it_replaces": "Goblin Guide dealing 2 combat damage",
+        "what_happens_instead": "Goblin Guide deals 6 combat damage to Bob"
+      }
+    ],
+    "continuous_effects": [],
+    "did_not_trigger": [
+      {
+        "permanent_name": "City on Fire",
+        "controller": "Alice",
+        "reason": "City on Fire has no triggered abilities that would trigger from combat damage."
+      }
+    ],
+    "warnings": []
+  },
+  "expected_after_validation": {
+    "did_not_trigger_count": 0,
+    "triggers_count": 0,
+    "replacement_effects_count": 1,
+    "warnings_added": false,
+    "notes": "City on Fire should be removed from did_not_trigger because it has no triggered abilities in its oracle text."
+  }
+}

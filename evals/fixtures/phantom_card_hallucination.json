@@ -1,0 +1,63 @@
+{
+  "name": "Claude references a card not on the board",
+  "description": "Claude hallucinates a trigger from a card that isn't on the battlefield. The validator should remove it.",
+  "board": {
+    "players": [
+      {
+        "name": "Alice",
+        "life": 20,
+        "permanents": [
+          {"card_name": "Monastery Swiftspear", "owner": "Alice"}
+        ]
+      },
+      {
+        "name": "Bob",
+        "life": 18,
+        "permanents": []
+      }
+    ],
+    "active_player": "Alice"
+  },
+  "card_data": {
+    "Monastery Swiftspear": {
+      "name": "Monastery Swiftspear",
+      "type_line": "Creature — Human Monk",
+      "oracle_text": "Haste\nProwess (Whenever you cast a noncreature spell, this creature gets +1/+1 until end of turn.)",
+      "power": "1",
+      "toughness": "2",
+      "keywords": ["Haste", "Prowess"]
+    }
+  },
+  "event": {
+    "event_type": "cast_spell",
+    "source_card": "Lightning Bolt",
+    "source_player": "Alice"
+  },
+  "claude_phase1": {
+    "triggers": [
+      {
+        "permanent_name": "Monastery Swiftspear",
+        "controller": "Alice",
+        "trigger_text": "Whenever you cast a noncreature spell",
+        "resulting_effects": "Monastery Swiftspear gets +1/+1 until end of turn"
+      },
+      {
+        "permanent_name": "Young Pyromancer",
+        "controller": "Alice",
+        "trigger_text": "Whenever you cast an instant or sorcery spell",
+        "resulting_effects": "Create a 1/1 red Elemental creature token"
+      }
+    ],
+    "replacement_effects": [],
+    "continuous_effects": [],
+    "did_not_trigger": [],
+    "warnings": []
+  },
+  "expected_after_validation": {
+    "did_not_trigger_count": 0,
+    "triggers_count": 1,
+    "replacement_effects_count": 0,
+    "warnings_added": false,
+    "notes": "Young Pyromancer trigger removed — card is not on the board."
+  }
+}

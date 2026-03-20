@@ -1,0 +1,75 @@
+{
+  "name": "Twinflame Tyrant replacement effect misclassified as trigger",
+  "description": "Claude classifies Twinflame Tyrant's damage-doubling replacement effect as a triggered ability. The validator should reclassify it.",
+  "board": {
+    "players": [
+      {
+        "name": "Alice",
+        "life": 30,
+        "permanents": [
+          {"card_name": "Twinflame Tyrant", "owner": "Alice"},
+          {"card_name": "Lightning Bolt", "owner": "Alice"}
+        ]
+      },
+      {
+        "name": "Bob",
+        "life": 20,
+        "permanents": [
+          {"card_name": "Grizzly Bears", "owner": "Bob"}
+        ]
+      }
+    ],
+    "active_player": "Alice"
+  },
+  "card_data": {
+    "Twinflame Tyrant": {
+      "name": "Twinflame Tyrant",
+      "type_line": "Creature — Dragon",
+      "oracle_text": "Flying\nIf a source you control would deal noncombat damage to an opponent or a permanent an opponent controls, it deals double that damage instead.",
+      "power": "6",
+      "toughness": "6",
+      "keywords": ["Flying"]
+    },
+    "Lightning Bolt": {
+      "name": "Lightning Bolt",
+      "type_line": "Instant",
+      "oracle_text": "Lightning Bolt deals 3 damage to any target."
+    },
+    "Grizzly Bears": {
+      "name": "Grizzly Bears",
+      "type_line": "Creature — Bear",
+      "oracle_text": "",
+      "power": "2",
+      "toughness": "2"
+    }
+  },
+  "event": {
+    "event_type": "damage_dealt",
+    "source_card": "Lightning Bolt",
+    "source_player": "Alice",
+    "target_player": "Bob",
+    "amount": 3
+  },
+  "claude_phase1": {
+    "triggers": [
+      {
+        "permanent_name": "Twinflame Tyrant",
+        "controller": "Alice",
+        "trigger_text": "damage doubling effect",
+        "trigger_condition": "noncombat damage to opponent",
+        "resulting_effects": "Lightning Bolt deals 6 damage instead of 3"
+      }
+    ],
+    "replacement_effects": [],
+    "continuous_effects": [],
+    "did_not_trigger": [],
+    "warnings": []
+  },
+  "expected_after_validation": {
+    "did_not_trigger_count": 0,
+    "triggers_count": 0,
+    "replacement_effects_count": 1,
+    "warnings_added": true,
+    "notes": "Twinflame Tyrant should be reclassified from trigger to replacement effect."
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "name": "Massacre Wurm + Blood Artist + City on Fire — complex interaction",
+  "description": "Multiple cards interacting: Massacre Wurm's continuous effect kills creatures, Blood Artist and Massacre Wurm both trigger from deaths, City on Fire triples damage. Claude incorrectly lists City on Fire in did_not_trigger.",
+  "board": {
+    "players": [
+      {
+        "name": "Alice",
+        "life": 30,
+        "permanents": [
+          {"card_name": "Massacre Wurm", "owner": "Alice"},
+          {"card_name": "Blood Artist", "owner": "Alice"},
+          {"card_name": "City on Fire", "owner": "Alice"}
+        ]
+      },
+      {
+        "name": "Bob",
+        "life": 20,
+        "permanents": [
+          {"card_name": "Llanowar Elves", "owner": "Bob"},
+          {"card_name": "Elvish Mystic", "owner": "Bob"},
+          {"card_name": "Birds of Paradise", "owner": "Bob"}
+        ]
+      }
+    ],
+    "active_player": "Alice"
+  },
+  "card_data": {
+    "Massacre Wurm": {
+      "name": "Massacre Wurm",
+      "type_line": "Creature — Phyrexian Wurm",
+      "oracle_text": "When Massacre Wurm enters the battlefield, creatures your opponents control get -2/-2 until end of turn.\nWhenever a creature an opponent controls dies, that player loses 2 life.",
+      "power": "6",
+      "toughness": "5"
+    },
+    "Blood Artist": {
+      "name": "Blood Artist",
+      "type_line": "Creature — Vampire",
+      "oracle_text": "Whenever Blood Artist or another creature dies, target player loses 1 life and you gain 1 life.",
+      "power": "0",
+      "toughness": "1"
+    },
+    "City on Fire": {
+      "name": "City on Fire",
+      "type_line": "Enchantment",
+      "oracle_text": "Convoke\nIf a source you control would deal damage to a permanent or player, it deals triple that damage to that permanent or player instead."
+    },
+    "Llanowar Elves": {
+      "name": "Llanowar Elves",
+      "type_line": "Creature — Elf Druid",
+      "oracle_text": "{T}: Add {G}.",
+      "power": "1",
+      "toughness": "1"
+    },
+    "Elvish Mystic": {
+      "name": "Elvish Mystic",
+      "type_line": "Creature — Elf Druid",
+      "oracle_text": "{T}: Add {G}.",
+      "power": "1",
+      "toughness": "1"
+    },
+    "Birds of Paradise": {
+      "name": "Birds of Paradise",
+      "type_line": "Creature — Bird",
+      "oracle_text": "Flying\n{T}: Add one mana of any color.",
+      "power": "0",
+      "toughness": "1",
+      "keywords": ["Flying"]
+    }
+  },
+  "event": {
+    "event_type": "enters_battlefield",
+    "source_card": "Massacre Wurm",
+    "source_player": "Alice"
+  },
+  "claude_phase1": {
+    "triggers": [
+      {
+        "permanent_name": "Massacre Wurm",
+        "controller": "Alice",
+        "trigger_text": "When Massacre Wurm enters the battlefield",
+        "resulting_effects": "Creatures opponents control get -2/-2 until end of turn"
+      },
+      {
+        "permanent_name": "Blood Artist",
+        "controller": "Alice",
+        "trigger_text": "Whenever Blood Artist or another creature dies",
+        "resulting_effects": "For each creature that dies, target player loses 1 life and Alice gains 1 life"
+      },
+      {
+        "permanent_name": "Massacre Wurm",
+        "controller": "Alice",
+        "trigger_text": "Whenever a creature an opponent controls dies",
+        "resulting_effects": "Bob loses 2 life for each creature that dies"
+      }
+    ],
+    "replacement_effects": [
+      {
+        "permanent_name": "City on Fire",
+        "controller": "Alice",
+        "replacement_text": "If a source you control would deal damage, triple it instead",
+        "what_it_replaces": "Life loss from Blood Artist and Massacre Wurm triggers",
+        "what_happens_instead": "Each instance of life loss is tripled"
+      }
+    ],
+    "continuous_effects": [
+      {
+        "permanent_name": "Massacre Wurm",
+        "controller": "Alice",
+        "effect_text": "Creatures opponents control get -2/-2 until end of turn",
+        "pt_modification": [-2, -2],
+        "affects": "creatures opponents control"
+      }
+    ],
+    "did_not_trigger": [
+      {
+        "permanent_name": "City on Fire",
+        "controller": "Alice",
+        "reason": "City on Fire has no triggered abilities."
+      }
+    ],
+    "warnings": []
+  },
+  "expected_after_validation": {
+    "did_not_trigger_count": 0,
+    "triggers_count": 3,
+    "replacement_effects_count": 1,
+    "warnings_added": false,
+    "notes": "City on Fire removed from did_not_trigger (no trigger text in oracle). All real triggers preserved."
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "name": "Clean output — validator should change nothing",
+  "description": "Claude's output is correct: Soul Warden triggers from a creature ETB, no replacement effects, no did_not_trigger issues. The validator should pass everything through unchanged.",
+  "board": {
+    "players": [
+      {
+        "name": "Alice",
+        "life": 22,
+        "permanents": [
+          {"card_name": "Soul Warden", "owner": "Alice"}
+        ]
+      },
+      {
+        "name": "Bob",
+        "life": 20,
+        "permanents": [
+          {"card_name": "Grizzly Bears", "owner": "Bob"}
+        ]
+      }
+    ],
+    "active_player": "Bob"
+  },
+  "card_data": {
+    "Soul Warden": {
+      "name": "Soul Warden",
+      "type_line": "Creature — Human Cleric",
+      "oracle_text": "Whenever another creature enters the battlefield, you gain 1 life.",
+      "power": "1",
+      "toughness": "1"
+    },
+    "Grizzly Bears": {
+      "name": "Grizzly Bears",
+      "type_line": "Creature — Bear",
+      "oracle_text": "",
+      "power": "2",
+      "toughness": "2"
+    }
+  },
+  "event": {
+    "event_type": "enters_battlefield",
+    "source_card": "Grizzly Bears",
+    "source_player": "Bob"
+  },
+  "claude_phase1": {
+    "triggers": [
+      {
+        "permanent_name": "Soul Warden",
+        "controller": "Alice",
+        "trigger_text": "Whenever another creature enters the battlefield",
+        "resulting_effects": "Alice gains 1 life"
+      }
+    ],
+    "replacement_effects": [],
+    "continuous_effects": [],
+    "did_not_trigger": [],
+    "warnings": []
+  },
+  "expected_after_validation": {
+    "did_not_trigger_count": 0,
+    "triggers_count": 1,
+    "replacement_effects_count": 0,
+    "warnings_added": false,
+    "notes": "Everything is correct. Validator should make no changes."
+  }
+}
