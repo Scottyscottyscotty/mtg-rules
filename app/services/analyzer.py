@@ -44,6 +44,7 @@ from app.services.game_rules import (
 )
 from app.services.game_rules.layers import classify_layer, get_layer_name
 from app.services.game_rules.stack import describe_stack, resolution_order
+from app.services.response_validator import validate_phase1
 from app.services.rules_engine import rules_engine
 from app.services.summary_renderer import render_summary
 
@@ -385,6 +386,9 @@ async def analyze_board(request: BoardAnalysisRequest) -> BoardAnalysisResult:
             summary=raw_text,
             plain_english=raw_text,
         )
+
+    # ── Validate Claude's output against oracle text ──────────────────────
+    phase1 = validate_phase1(phase1, card_data, card_names)
 
     # ── Deterministic ordering ────────────────────────────────────────────
 
