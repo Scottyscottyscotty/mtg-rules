@@ -97,7 +97,9 @@ class TestRenderSummary:
         assert "Blood Artist" in plain
         assert "Whenever a creature dies" in summary
 
-    def test_did_not_trigger_included(self):
+    def test_did_not_trigger_in_technical_not_plain(self):
+        """did_not_trigger appears in technical summary but NOT in plain English
+        (the UI renders it as a separate section)."""
         dnt = DidNotTrigger(
             permanent_name="Soul Warden",
             controller="Bob",
@@ -114,8 +116,8 @@ class TestRenderSummary:
             warnings=[],
         )
         assert "Soul Warden" in summary
-        assert "Soul Warden" in plain
-        assert "dying is not entering the battlefield" in plain
+        # Plain English should NOT include did_not_trigger (UI handles it)
+        assert "Soul Warden" not in plain
 
     def test_layer_effects_included(self):
         effect = LayerEffect(

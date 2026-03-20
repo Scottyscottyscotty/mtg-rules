@@ -257,7 +257,11 @@ CRITICAL rules for trigger identification:
 - Sacrifice is NOT the same as destroy (both cause "dying" though)
 - "Leaves the battlefield" includes dying; "dies" is specifically going to graveyard
 - "Cast" triggers happen when spell goes on stack; ETB triggers when it resolves
-- For EACH permanent with triggered abilities that didn't fire, explain WHY in did_not_trigger\
+- For EACH permanent that HAS a triggered ability (When/Whenever/At clause) in its oracle text \
+but that trigger did NOT fire from this event, explain WHY in did_not_trigger
+- Do NOT include cards in did_not_trigger if they have no triggered abilities at all — cards with \
+only replacement effects, static abilities, or keywords should NOT appear in did_not_trigger. \
+Replacement effects are NOT triggers.\
 """
 
 # ---------------------------------------------------------------------------

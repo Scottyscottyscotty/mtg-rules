@@ -164,14 +164,8 @@ def _render_plain_english(
             parts.append(f"- {line}")
         parts.append("")
 
-    # Did not trigger
-    if did_not_trigger:
-        parts.append("**What does NOT trigger:**")
-        for item in did_not_trigger:
-            parts.append(
-                f"- {item.permanent_name} didn't trigger because {item.reason}"
-            )
-        parts.append("")
+    # NOTE: did_not_trigger is intentionally omitted here — the UI renders
+    # it as a separate dedicated section. Including it here would duplicate.
 
     # Warnings
     if warnings:
