@@ -21,6 +21,13 @@ understanding.
 from app.services.game_rules.state_based_actions import check_sbas, SBAResult
 from app.services.game_rules.layers import sort_effects_by_layer, LayerEffect
 from app.services.game_rules.stack import order_triggers_apnap, StackItem
+from app.services.game_rules.combat import (
+    resolve_combat,
+    CombatCreature,
+    CombatKeyword,
+    BlockAssignment,
+    CombatResult,
+)
 
 __all__ = [
     "check_sbas",
@@ -29,4 +36,9 @@ __all__ = [
     "LayerEffect",
     "order_triggers_apnap",
     "StackItem",
+    "resolve_combat",
+    "CombatCreature",
+    "CombatKeyword",
+    "BlockAssignment",
+    "CombatResult",
 ]

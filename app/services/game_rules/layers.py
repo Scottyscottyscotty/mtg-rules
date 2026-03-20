@@ -92,9 +92,10 @@ def classify_layer(effect_text: str) -> Layer:
     # Check from most specific (sublayers) to least specific
     # Order matters: check 7a-7e before layer 4's "becomes a"
     for layer in [
+        Layer.COPY,  # Must check before PT_SET ("becomes a copy" vs "becomes a 3/3")
         Layer.PT_CDA, Layer.PT_SWITCH, Layer.PT_COUNTERS,
         Layer.PT_MODIFICATION, Layer.PT_SET,
-        Layer.COPY, Layer.CONTROL, Layer.TEXT,
+        Layer.CONTROL, Layer.TEXT,
         Layer.TYPE, Layer.COLOR, Layer.ABILITY,
     ]:
         for keyword in LAYER_KEYWORDS[layer]:

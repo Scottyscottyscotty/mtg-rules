@@ -161,3 +161,40 @@ class BoardAnalysisResult(BaseModel):
     did_not_trigger: list[DidNotTrigger] = []
     summary: str = ""
     plain_english: str = ""
+
+
+# --- Combat simulation models ---
+
+class CombatCreatureInput(BaseModel):
+    """A creature in combat (from the user)."""
+    card_name: str
+    controller: str
+    power: int | None = None
+    toughness: int | None = None
+    # Populated from Scryfall if not provided
+
+class CombatBlockAssignment(BaseModel):
+    """Attacker and its ordered blockers."""
+    attacker: CombatCreatureInput
+    blockers: list[CombatCreatureInput] = []
+
+class CombatSimRequest(BaseModel):
+    """Request to simulate combat damage."""
+    assignments: list[CombatBlockAssignment]
+    defending_player: str
+
+class CombatDamageEvent(BaseModel):
+    source: str
+    target: str
+    amount: int
+    keywords: list[str] = []
+
+class CombatSimResult(BaseModel):
+    """Result of combat damage simulation."""
+    first_strike_damage: list[CombatDamageEvent] = []
+    normal_damage: list[CombatDamageEvent] = []
+    creatures_that_die: list[str] = []
+    player_damage: dict[str, int] = {}
+    life_gained: dict[str, int] = {}
+    warnings: list[str] = []
+    notes: list[str] = []

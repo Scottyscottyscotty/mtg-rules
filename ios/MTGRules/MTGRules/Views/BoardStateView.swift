@@ -4,6 +4,8 @@ struct BoardStateView: View {
     @StateObject private var vm = BoardViewModel()
     @State private var newPlayerName = ""
     @State private var permanentInputs: [Int: String] = [:]
+    @State private var saveName = ""
+    @State private var selectedSave = ""
 
     var body: some View {
         NavigationStack {
@@ -38,6 +40,9 @@ struct BoardStateView: View {
                     if let result = vm.result {
                         resultSection(result)
                     }
+
+                    // Save / Load
+                    saveLoadSection
                 }
                 .padding()
             }
@@ -315,6 +320,62 @@ struct BoardStateView: View {
                 .cornerRadius(8)
             }
         }
+    }
+
+    // MARK: - Save / Load
+
+    private var saveLoadSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Save / Load Board")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+
+            HStack {
+                TextField("Save name", text: $saveName)
+                    .textFieldStyle(.roundedBorder)
+                Button("Save") {
+                    vm.saveBoard(name: saveName)
+                    saveName = ""
+                }
+                .buttonStyle(.bordered)
+                .tint(Color("AccentRed"))
+                .disabled(saveName.trimmingCharacters(in: .whitespaces).isEmpty || vm.players.isEmpty)
+            }
+
+            if !vm.savedBoardNames.isEmpty {
+                HStack {
+                    Picker("Load", selection: $selectedSave) {
+                        Text("-- select --").tag("")
+                        ForEach(vm.savedBoardNames, id: \.self) { name in
+                            Text(name).tag(name)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(Color("AccentRed"))
+
+                    Button("Load") {
+                        vm.loadBoard(name: selectedSave)
+                        selectedSave = ""
+                    }
+                    .disabled(selectedSave.isEmpty)
+
+                    Button("Delete") {
+                        vm.deleteBoard(name: selectedSave)
+                        selectedSave = ""
+                    }
+                    .foregroundColor(Color("AccentRed"))
+                    .disabled(selectedSave.isEmpty)
+                }
+            }
+        }
+        .padding()
+        .background(Color("CardBackground"))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color("Border"), lineWidth: 1)
+        )
     }
 
     // MARK: - Helpers

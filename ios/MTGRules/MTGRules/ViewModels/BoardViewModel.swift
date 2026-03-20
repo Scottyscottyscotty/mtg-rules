@@ -82,6 +82,58 @@ class BoardViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Save / Load
+
+    struct SavedBoard: Codable {
+        let players: [PlayerState]
+        let activePlayer: String
+        let savedAt: Date
+    }
+
+    private static let savesKey = "mtg_saved_boards"
+
+    var savedBoardNames: [String] {
+        let saves = Self.loadSaves()
+        return Array(saves.keys).sorted()
+    }
+
+    func saveBoard(name: String) {
+        guard !name.isEmpty, !players.isEmpty else { return }
+        var saves = Self.loadSaves()
+        saves[name] = SavedBoard(
+            players: players,
+            activePlayer: activePlayer,
+            savedAt: Date()
+        )
+        Self.storeSaves(saves)
+    }
+
+    func loadBoard(name: String) {
+        let saves = Self.loadSaves()
+        guard let save = saves[name] else { return }
+        players = save.players
+        activePlayer = save.activePlayer
+    }
+
+    func deleteBoard(name: String) {
+        var saves = Self.loadSaves()
+        saves.removeValue(forKey: name)
+        Self.storeSaves(saves)
+    }
+
+    private static func loadSaves() -> [String: SavedBoard] {
+        guard let data = UserDefaults.standard.data(forKey: savesKey),
+              let saves = try? JSONDecoder().decode([String: SavedBoard].self, from: data)
+        else { return [:] }
+        return saves
+    }
+
+    private static func storeSaves(_ saves: [String: SavedBoard]) {
+        if let data = try? JSONEncoder().encode(saves) {
+            UserDefaults.standard.set(data, forKey: savesKey)
+        }
+    }
+
     func analyzeEvent() async {
         guard !players.isEmpty else { return }
         isLoading = true

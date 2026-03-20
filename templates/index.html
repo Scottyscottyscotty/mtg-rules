@@ -21,6 +21,7 @@
         <div class="tabs">
             <button class="tab active" data-panel="chat">Rules Chat</button>
             <button class="tab" data-panel="board">Board State</button>
+            <button class="tab" data-panel="combat">Combat</button>
             <button class="tab" data-panel="interactions">Interactions</button>
             <button class="tab" data-panel="cards">Card Search</button>
             <button class="tab" data-panel="rules">Rules Lookup</button>
@@ -115,6 +116,47 @@
             </div>
 
             <div id="board-results"></div>
+
+            <!-- Save / Load board state -->
+            <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);
+                        display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                <input type="text" id="save-name-input" placeholder="Save name (e.g. 'EDH game 1')"
+                       style="width: 200px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
+                <button onclick="saveBoardState()">Save Board</button>
+                <select id="load-select" class="format-select" style="min-width: 160px;">
+                    <option value="">-- Load saved --</option>
+                </select>
+                <button onclick="loadBoardState()">Load</button>
+                <button onclick="deleteBoardState()" style="background: transparent; color: var(--accent); font-size: 0.85rem;">Delete</button>
+            </div>
+        </div>
+
+        <!-- Combat Panel -->
+        <div id="combat" class="panel">
+            <div class="interaction-input">
+                <h2>Combat Simulator</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;">
+                    Set up attackers and blockers to simulate combat damage. The engine handles
+                    first strike, double strike, trample, deathtouch, lifelink, flying, and more.
+                    All damage math is deterministic — no AI needed.
+                </p>
+
+                <div style="margin-bottom: 1rem;">
+                    <label style="color: var(--text-muted); font-size: 0.85rem;">Defending player:</label>
+                    <input type="text" id="combat-defending-player" placeholder="Player name"
+                           value="Opponent"
+                           style="width: 150px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
+                </div>
+
+                <div id="combat-assignments"></div>
+
+                <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                    <button onclick="addCombatAttacker()">+ Add Attacker</button>
+                    <button id="run-combat-btn" onclick="runCombat()">Simulate Combat</button>
+                </div>
+            </div>
+
+            <div id="combat-results"></div>
         </div>
 
         <!-- Interactions Panel -->

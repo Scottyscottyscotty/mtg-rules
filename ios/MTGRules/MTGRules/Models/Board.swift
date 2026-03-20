@@ -109,6 +109,64 @@ struct DidNotTrigger: Codable, Identifiable {
     }
 }
 
+// MARK: - Combat Simulation
+
+struct CombatCreatureInput: Codable {
+    var cardName: String
+    var controller: String
+    var power: Int?
+    var toughness: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case cardName = "card_name"
+        case controller, power, toughness
+    }
+}
+
+struct CombatBlockAssignment: Codable {
+    var attacker: CombatCreatureInput
+    var blockers: [CombatCreatureInput] = []
+}
+
+struct CombatSimRequest: Codable {
+    let assignments: [CombatBlockAssignment]
+    let defendingPlayer: String
+
+    enum CodingKeys: String, CodingKey {
+        case assignments
+        case defendingPlayer = "defending_player"
+    }
+}
+
+struct CombatDamageEvent: Codable, Identifiable {
+    var id: String { "\(source)-\(target)-\(amount)" }
+    let source: String
+    let target: String
+    let amount: Int
+    let keywords: [String]
+}
+
+struct CombatSimResult: Codable {
+    let firstStrikeDamage: [CombatDamageEvent]
+    let normalDamage: [CombatDamageEvent]
+    let creaturesThatDie: [String]
+    let playerDamage: [String: Int]
+    let lifeGained: [String: Int]
+    let warnings: [String]
+    let notes: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case firstStrikeDamage = "first_strike_damage"
+        case normalDamage = "normal_damage"
+        case creaturesThatDie = "creatures_that_die"
+        case playerDamage = "player_damage"
+        case lifeGained = "life_gained"
+        case warnings, notes
+    }
+}
+
+// MARK: - Board Analysis
+
 struct BoardAnalysisResult: Codable {
     let originalEvent: GameEvent
     let cascade: [CascadeStep]

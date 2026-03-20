@@ -21,23 +21,29 @@ struct ContentView: View {
                     }
                     .tag(1)
 
+                CombatView()
+                    .tabItem {
+                        Label("Combat", systemImage: "shield.lefthalf.filled")
+                    }
+                    .tag(2)
+
                 CardSearchView()
                     .tabItem {
                         Label("Cards", systemImage: "rectangle.stack")
                     }
-                    .tag(2)
+                    .tag(3)
 
                 RulesLookupView()
                     .tabItem {
                         Label("Rules", systemImage: "book")
                     }
-                    .tag(3)
+                    .tag(4)
 
                 SettingsView()
                     .tabItem {
                         Label("Settings", systemImage: "gear")
                     }
-                    .tag(4)
+                    .tag(5)
             }
             .tint(Color("AccentRed"))
         }

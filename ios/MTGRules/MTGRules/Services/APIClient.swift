@@ -69,6 +69,10 @@ class APIClient {
         return try await post("/api/board/analyze", body: body)
     }
 
+    func simulateCombat(request: CombatSimRequest) async throws -> CombatSimResult {
+        return try await post("/api/board/combat", body: request)
+    }
+
     // MARK: - Chat
 
     func chat(question: String, history: [ChatMessage]) async throws -> String {

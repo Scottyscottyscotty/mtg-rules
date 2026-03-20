@@ -9,10 +9,15 @@ Flow:
 6. Return Claude's answer
 """
 
+import logging
 import os
 import re
 
 import anthropic
+
+logger = logging.getLogger(__name__)
+
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 from app.services.rules_engine import rules_engine
 from app.services.scryfall import fetch_card
@@ -107,7 +112,7 @@ async def chat(
 
     client = anthropic.AsyncAnthropic(api_key=api_key)
     response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model=CLAUDE_MODEL,
         max_tokens=1500,
         system=SYSTEM_PROMPT,
         messages=messages,

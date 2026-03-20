@@ -15,10 +15,56 @@ SCRYFALL_API = "https://api.scryfall.com"
 CACHE_DIR = Path("cache")
 CACHE_DIR.mkdir(exist_ok=True)
 
+MAX_RETRIES = 3
+RETRY_BACKOFF = [0.5, 1.0, 2.0]  # seconds between retries
+
 
 def _cache_path(card_name: str) -> Path:
     safe = card_name.lower().replace(" ", "_").replace(",", "").replace("'", "")
     return CACHE_DIR / f"{safe}.json"
+
+
+async def _request_with_retry(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    **kwargs,
+) -> httpx.Response | None:
+    """Make an HTTP request with retry logic for rate limits and transient errors."""
+    for attempt in range(MAX_RETRIES + 1):
+        resp = await client.request(method, url, **kwargs)
+
+        if resp.status_code == 200:
+            return resp
+
+        # Rate limited — back off and retry
+        if resp.status_code == 429:
+            if attempt < MAX_RETRIES:
+                wait = RETRY_BACKOFF[attempt]
+                logger.warning(
+                    "Scryfall rate limited (429), retrying in %.1fs (attempt %d/%d)",
+                    wait, attempt + 1, MAX_RETRIES,
+                )
+                await asyncio.sleep(wait)
+                continue
+            logger.error("Scryfall rate limited after %d retries", MAX_RETRIES)
+            return None
+
+        # Server error — retry
+        if resp.status_code >= 500:
+            if attempt < MAX_RETRIES:
+                wait = RETRY_BACKOFF[attempt]
+                logger.warning(
+                    "Scryfall server error (%d), retrying in %.1fs",
+                    resp.status_code, wait,
+                )
+                await asyncio.sleep(wait)
+                continue
+
+        # Client error (404, etc.) — don't retry
+        return resp
+
+    return None
 
 
 async def fetch_card(name: str) -> Card | None:
@@ -30,14 +76,16 @@ async def fetch_card(name: str) -> Card | None:
 
     async with httpx.AsyncClient() as client:
         # Scryfall asks for 50-100ms between requests
-        resp = await client.get(
+        resp = await _request_with_retry(
+            client, "GET",
             f"{SCRYFALL_API}/cards/named",
             params={"fuzzy": name},
             timeout=10.0,
         )
-        if resp.status_code != 200:
+        if resp is None or resp.status_code != 200:
             logger.warning(
-                "Scryfall lookup failed for '%s': HTTP %d", name, resp.status_code
+                "Scryfall lookup failed for '%s': %s",
+                name, f"HTTP {resp.status_code}" if resp else "no response",
             )
             return None
         logger.info("Scryfall found card: '%s'", name)
@@ -55,11 +103,12 @@ async def fetch_card(name: str) -> Card | None:
 
 async def _fetch_rulings(client: httpx.AsyncClient, card_id: str) -> list[str]:
     await asyncio.sleep(0.1)  # Rate limiting
-    resp = await client.get(
+    resp = await _request_with_retry(
+        client, "GET",
         f"{SCRYFALL_API}/cards/{card_id}/rulings",
         timeout=10.0,
     )
-    if resp.status_code != 200:
+    if resp is None or resp.status_code != 200:
         return []
     data = resp.json()
     return [r["comment"] for r in data.get("data", [])]
@@ -68,12 +117,13 @@ async def _fetch_rulings(client: httpx.AsyncClient, card_id: str) -> list[str]:
 async def autocomplete_card(query: str) -> list[str]:
     """Autocomplete card names using Scryfall's autocomplete endpoint."""
     async with httpx.AsyncClient() as client:
-        resp = await client.get(
+        resp = await _request_with_retry(
+            client, "GET",
             f"{SCRYFALL_API}/cards/autocomplete",
             params={"q": query},
             timeout=5.0,
         )
-        if resp.status_code != 200:
+        if resp is None or resp.status_code != 200:
             return []
         data = resp.json()
         return data.get("data", [])
@@ -82,12 +132,13 @@ async def autocomplete_card(query: str) -> list[str]:
 async def search_cards(query: str, limit: int = 10) -> list[Card]:
     """Search for cards matching a query string."""
     async with httpx.AsyncClient() as client:
-        resp = await client.get(
+        resp = await _request_with_retry(
+            client, "GET",
             f"{SCRYFALL_API}/cards/search",
             params={"q": query, "order": "name"},
             timeout=10.0,
         )
-        if resp.status_code != 200:
+        if resp is None or resp.status_code != 200:
             return []
         data = resp.json()
         cards = []

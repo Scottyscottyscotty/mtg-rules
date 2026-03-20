@@ -675,9 +675,272 @@ function formatMarkdown(text) {
     return html;
 }
 
-// Init
+// --- Board State Save / Load ---
+
+function saveBoardState() {
+    const name = document.getElementById('save-name-input').value.trim();
+    if (!name || state.players.length === 0) return;
+
+    const saves = JSON.parse(localStorage.getItem('mtg_saved_boards') || '{}');
+    saves[name] = {
+        players: state.players,
+        activePlayer: activePlayerSelect.value,
+        savedAt: new Date().toISOString(),
+    };
+    localStorage.setItem('mtg_saved_boards', JSON.stringify(saves));
+    document.getElementById('save-name-input').value = '';
+    refreshSavesList();
+}
+
+function loadBoardState() {
+    const name = document.getElementById('load-select').value;
+    if (!name) return;
+
+    const saves = JSON.parse(localStorage.getItem('mtg_saved_boards') || '{}');
+    const save = saves[name];
+    if (!save) return;
+
+    state.players = save.players;
+    renderPlayers();
+    if (save.activePlayer) {
+        activePlayerSelect.value = save.activePlayer;
+    }
+}
+
+function deleteBoardState() {
+    const name = document.getElementById('load-select').value;
+    if (!name) return;
+
+    const saves = JSON.parse(localStorage.getItem('mtg_saved_boards') || '{}');
+    delete saves[name];
+    localStorage.setItem('mtg_saved_boards', JSON.stringify(saves));
+    refreshSavesList();
+}
+
+function refreshSavesList() {
+    const select = document.getElementById('load-select');
+    const saves = JSON.parse(localStorage.getItem('mtg_saved_boards') || '{}');
+    select.innerHTML = '<option value="">-- Load saved --</option>' +
+        Object.keys(saves).map(name => {
+            const date = new Date(saves[name].savedAt).toLocaleDateString();
+            return `<option value="${escapeHtml(name)}">${escapeHtml(name)} (${date})</option>`;
+        }).join('');
+}
+
+// --- Combat Simulator ---
+
+const combatState = {
+    assignments: [],  // [{attacker: {card_name, controller, power, toughness}, blockers: [...]}]
+};
+
+function addCombatAttacker() {
+    combatState.assignments.push({
+        attacker: { card_name: '', controller: 'You', power: null, toughness: null },
+        blockers: [],
+    });
+    renderCombatAssignments();
+}
+
+function removeCombatAttacker(idx) {
+    combatState.assignments.splice(idx, 1);
+    renderCombatAssignments();
+}
+
+function addCombatBlocker(attackerIdx) {
+    combatState.assignments[attackerIdx].blockers.push({
+        card_name: '', controller: 'Opponent', power: null, toughness: null,
+    });
+    renderCombatAssignments();
+}
+
+function removeCombatBlocker(attackerIdx, blockerIdx) {
+    combatState.assignments[attackerIdx].blockers.splice(blockerIdx, 1);
+    renderCombatAssignments();
+}
+
+function renderCombatAssignments() {
+    const container = document.getElementById('combat-assignments');
+    container.innerHTML = combatState.assignments.map((a, ai) => `
+        <div class="results-section" style="margin-bottom: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0; font-size: 0.95rem;">Attacker ${ai + 1}</h3>
+                <button onclick="removeCombatAttacker(${ai})"
+                        style="background: transparent; color: var(--accent); font-size: 0.8rem; padding: 0.25rem 0.5rem;">
+                    Remove
+                </button>
+            </div>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
+                <input type="text" class="combat-attacker-name" data-idx="${ai}"
+                       value="${escapeHtml(a.attacker.card_name)}" placeholder="Card name"
+                       style="flex: 1; min-width: 150px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
+                <input type="number" class="combat-attacker-power" data-idx="${ai}"
+                       value="${a.attacker.power ?? ''}" placeholder="P"
+                       style="width: 50px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text); text-align: center;">
+                <input type="number" class="combat-attacker-toughness" data-idx="${ai}"
+                       value="${a.attacker.toughness ?? ''}" placeholder="T"
+                       style="width: 50px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text); text-align: center;">
+                <input type="text" class="combat-attacker-controller" data-idx="${ai}"
+                       value="${escapeHtml(a.attacker.controller)}" placeholder="Controller"
+                       style="width: 100px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
+            </div>
+            <div style="padding-left: 1.5rem; margin-top: 0.5rem; border-left: 2px solid var(--border);">
+                <span style="color: var(--text-muted); font-size: 0.8rem;">Blockers:</span>
+                ${a.blockers.map((b, bi) => `
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; align-items: center;">
+                        <input type="text" class="combat-blocker-name" data-ai="${ai}" data-bi="${bi}"
+                               value="${escapeHtml(b.card_name)}" placeholder="Blocker name"
+                               style="flex: 1; min-width: 120px; padding: 0.4rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 0.9rem;">
+                        <input type="number" class="combat-blocker-power" data-ai="${ai}" data-bi="${bi}"
+                               value="${b.power ?? ''}" placeholder="P"
+                               style="width: 45px; padding: 0.4rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text); text-align: center; font-size: 0.9rem;">
+                        <input type="number" class="combat-blocker-toughness" data-ai="${ai}" data-bi="${bi}"
+                               value="${b.toughness ?? ''}" placeholder="T"
+                               style="width: 45px; padding: 0.4rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text); text-align: center; font-size: 0.9rem;">
+                        <button onclick="removeCombatBlocker(${ai}, ${bi})"
+                                style="background: transparent; color: var(--accent); font-size: 0.8rem; padding: 0.2rem 0.5rem;">x</button>
+                    </div>
+                `).join('')}
+                <button onclick="addCombatBlocker(${ai})"
+                        style="margin-top: 0.5rem; font-size: 0.8rem; padding: 0.3rem 0.75rem;">+ Blocker</button>
+            </div>
+        </div>
+    `).join('');
+
+    // Attach autocomplete to attacker name inputs
+    container.querySelectorAll('.combat-attacker-name').forEach(input => {
+        setupAutocomplete(input, null);
+    });
+    container.querySelectorAll('.combat-blocker-name').forEach(input => {
+        setupAutocomplete(input, null);
+    });
+}
+
+function collectCombatState() {
+    // Read current values from DOM into combatState
+    document.querySelectorAll('.combat-attacker-name').forEach(el => {
+        const idx = parseInt(el.dataset.idx);
+        combatState.assignments[idx].attacker.card_name = el.value.trim();
+    });
+    document.querySelectorAll('.combat-attacker-power').forEach(el => {
+        const idx = parseInt(el.dataset.idx);
+        combatState.assignments[idx].attacker.power = el.value ? parseInt(el.value) : null;
+    });
+    document.querySelectorAll('.combat-attacker-toughness').forEach(el => {
+        const idx = parseInt(el.dataset.idx);
+        combatState.assignments[idx].attacker.toughness = el.value ? parseInt(el.value) : null;
+    });
+    document.querySelectorAll('.combat-attacker-controller').forEach(el => {
+        const idx = parseInt(el.dataset.idx);
+        combatState.assignments[idx].attacker.controller = el.value.trim() || 'You';
+    });
+    document.querySelectorAll('.combat-blocker-name').forEach(el => {
+        const ai = parseInt(el.dataset.ai), bi = parseInt(el.dataset.bi);
+        combatState.assignments[ai].blockers[bi].card_name = el.value.trim();
+    });
+    document.querySelectorAll('.combat-blocker-power').forEach(el => {
+        const ai = parseInt(el.dataset.ai), bi = parseInt(el.dataset.bi);
+        combatState.assignments[ai].blockers[bi].power = el.value ? parseInt(el.value) : null;
+    });
+    document.querySelectorAll('.combat-blocker-toughness').forEach(el => {
+        const ai = parseInt(el.dataset.ai), bi = parseInt(el.dataset.bi);
+        combatState.assignments[ai].blockers[bi].toughness = el.value ? parseInt(el.value) : null;
+    });
+}
+
+async function runCombat() {
+    collectCombatState();
+
+    const body = {
+        assignments: combatState.assignments.filter(a => a.attacker.card_name).map(a => ({
+            attacker: a.attacker,
+            blockers: a.blockers.filter(b => b.card_name),
+        })),
+        defending_player: document.getElementById('combat-defending-player').value.trim() || 'Opponent',
+    };
+
+    if (body.assignments.length === 0) return;
+
+    const results = document.getElementById('combat-results');
+    results.innerHTML = '<div class="loading"><span class="spinner"></span>Simulating combat...</div>';
+
+    try {
+        const resp = await fetch('/api/board/combat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!resp.ok) {
+            const data = await resp.json();
+            throw new Error(data.detail || 'Combat simulation failed');
+        }
+        const result = await resp.json();
+        renderCombatResult(result);
+    } catch (err) {
+        results.innerHTML = `<div class="error">${err.message}</div>`;
+    }
+}
+
+function renderCombatResult(result) {
+    let html = '';
+
+    // Player damage summary
+    if (Object.keys(result.player_damage).length) {
+        html += '<div class="summary-box">';
+        for (const [player, dmg] of Object.entries(result.player_damage)) {
+            html += `<strong>${escapeHtml(player)}</strong> takes <strong>${dmg} damage</strong><br>`;
+        }
+        html += '</div>';
+    }
+
+    // Life gained
+    if (Object.keys(result.life_gained).length) {
+        html += '<div class="summary-box" style="border-left: 3px solid #4caf50;">';
+        for (const [player, life] of Object.entries(result.life_gained)) {
+            html += `<strong>${escapeHtml(player)}</strong> gains <strong>${life} life</strong> (lifelink)<br>`;
+        }
+        html += '</div>';
+    }
+
+    // Creatures that die
+    if (result.creatures_that_die.length) {
+        html += '<div class="results-section"><h2 style="color: var(--accent);">Creatures That Die</h2><ul>';
+        result.creatures_that_die.forEach(c => {
+            html += `<li><strong>${escapeHtml(c)}</strong></li>`;
+        });
+        html += '</ul></div>';
+    }
+
+    // Step-by-step notes
+    if (result.notes.length) {
+        html += '<div class="results-section"><h2>Step-by-Step</h2>';
+        result.notes.forEach(note => {
+            if (note.endsWith(':')) {
+                html += `<div style="margin-top: 0.75rem; font-weight: bold; color: var(--accent);">${escapeHtml(note)}</div>`;
+            } else if (note.startsWith('  *')) {
+                html += `<div style="padding-left: 1rem; color: var(--warning);">${escapeHtml(note)}</div>`;
+            } else {
+                html += `<div style="padding-left: 1rem;">${escapeHtml(note)}</div>`;
+            }
+        });
+        html += '</div>';
+    }
+
+    // Warnings
+    if (result.warnings.length) {
+        html += '<div class="results-section"><h2>Warnings</h2><ul>';
+        result.warnings.forEach(w => {
+            html += `<li style="color: var(--warning);">${escapeHtml(w)}</li>`;
+        });
+        html += '</ul></div>';
+    }
+
+    document.getElementById('combat-results').innerHTML = html;
+}
+
+// --- Init ---
 renderCardTags();
 renderPlayers();
+refreshSavesList();
 
 // Set up autocomplete on static card inputs
 setupAutocomplete(interactionInput, null);

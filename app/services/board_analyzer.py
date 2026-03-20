@@ -16,10 +16,15 @@ Claude focuses on WHAT happens. The code ensures the ORDER is correct.
 
 import asyncio
 import json
+import logging
 import os
 import re
 
 import anthropic
+
+logger = logging.getLogger(__name__)
+
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 from app.models.board import (
     BoardAnalysisRequest,
@@ -243,7 +248,7 @@ async def analyze_board_event(request: BoardAnalysisRequest) -> BoardAnalysisRes
 
     client = anthropic.AsyncAnthropic(api_key=api_key)
     response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model=CLAUDE_MODEL,
         max_tokens=4000,
         system=PHASE1_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
@@ -357,7 +362,7 @@ async def analyze_board_event(request: BoardAnalysisRequest) -> BoardAnalysisRes
     )
 
     summary_response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model=CLAUDE_MODEL,
         max_tokens=2000,
         system=SUMMARY_SYSTEM,
         messages=[{"role": "user", "content": summary_prompt}],
