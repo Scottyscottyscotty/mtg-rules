@@ -8,7 +8,6 @@ const state = {
 
 // --- Card Name Autocomplete ---
 let acDebounceTimer = null;
-let acActiveDropdown = null;
 
 function setupAutocomplete(input, onSelect) {
     // Create dropdown
@@ -264,7 +263,7 @@ function renderInteractionResult(result) {
     // Card images
     const cardsWithImages = result.cards.filter(c => c.image_uri);
     if (cardsWithImages.length) {
-        html += '<div class="card-grid" style="margin-top:1rem">';
+        html += '<div class="card-grid mt-md">';
         cardsWithImages.forEach(c => {
             html += `<div class="card-result">
                 <img src="${c.image_uri}" alt="${c.name}" loading="lazy">
@@ -356,37 +355,31 @@ function renderPlayers() {
 
     // Render player boards
     playersContainer.innerHTML = state.players.map((player, pi) => `
-        <div class="results-section" style="margin-bottom: 1rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <h2 style="border-bottom: none; padding-bottom: 0; margin-bottom: 0;">
+        <div class="results-section mb-md">
+            <div class="player-header">
+                <h2>
                     ${escapeHtml(player.name)}
-                    <span style="font-weight: 300; font-size: 0.85rem; color: var(--text-muted);">
+                    <span class="player-life-label">
                         (Life:
                         <input type="number" value="${player.life}" min="0"
-                               onchange="updateLife(${pi}, this.value)"
-                               style="width: 50px; background: var(--bg-input); border: 1px solid var(--border);
-                                      border-radius: 4px; color: var(--text); text-align: center; padding: 2px;">)
+                               class="life-input"
+                               onchange="updateLife(${pi}, this.value)">)
                     </span>
                 </h2>
-                <button onclick="removePlayer(${pi})"
-                        style="background: transparent; color: var(--accent); font-size: 0.8rem; padding: 0.25rem 0.5rem;">
-                    Remove
-                </button>
+                <button class="btn-ghost" onclick="removePlayer(${pi})">Remove</button>
             </div>
 
-            <div style="margin-top: 0.75rem;">
-                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;" class="perm-add-row">
-                    <input type="text" id="perm-input-${pi}" class="perm-ac-input" data-player="${pi}"
-                           placeholder="Add permanent (card name)"
-                           style="flex: 1; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border);
-                                  border-radius: 6px; color: var(--text);">
-                    <button onclick="addPermanent(${pi})" style="padding: 0.5rem 1rem; font-size: 0.85rem;">Add</button>
+            <div class="perm-section">
+                <div class="form-row mb-sm perm-add-row">
+                    <input type="text" id="perm-input-${pi}" class="perm-ac-input form-input perm-input" data-player="${pi}"
+                           placeholder="Add permanent (card name)">
+                    <button class="btn-sm" onclick="addPermanent(${pi})">Add</button>
                 </div>
                 <div class="card-tags">
                     ${player.permanents.map((perm, ci) => `
                         <span class="card-tag">
                             ${escapeHtml(perm.card_name)}
-                            ${perm.tapped ? '<span style="color: var(--warning);">(T)</span>' : ''}
+                            ${perm.tapped ? '<span class="tapped-indicator">(T)</span>' : ''}
                             <span class="remove" onclick="removePermanent(${pi}, ${ci})">x</span>
                         </span>
                     `).join('')}
@@ -488,20 +481,20 @@ function renderBoardResult(result) {
     html += `<div id="board-view-plain" class="board-view active">`;
     html += `<div class="summary-box plain-english-box">${escapeHtml(result.plain_english)}</div>`;
     if (result.did_not_trigger && result.did_not_trigger.length) {
-        html += '<div class="results-section" style="margin-top: 1rem;"><h2 style="color: #f0a040;">⚠ Did NOT Trigger</h2>';
+        html += '<div class="results-section mt-md"><h2 class="warning-header">Did NOT Trigger</h2>';
         result.did_not_trigger.forEach(d => {
-            html += `<div style="margin-bottom: 0.75rem; padding: 0.75rem; background: rgba(240, 160, 64, 0.08); border-left: 3px solid #f0a040; border-radius: 4px;">
+            html += `<div class="did-not-trigger-item">
                 <strong>${escapeHtml(d.permanent_name)}</strong>
-                <span style="color: var(--text-muted);"> (${escapeHtml(d.controller)})</span>
-                <div style="margin-top: 0.25rem; color: var(--text-muted);">${escapeHtml(d.reason)}</div>
+                <span class="text-muted"> (${escapeHtml(d.controller)})</span>
+                <div class="reason">${escapeHtml(d.reason)}</div>
             </div>`;
         });
         html += '</div>';
     }
     if (result.warnings.length) {
-        html += '<div class="results-section" style="margin-top: 1rem;"><h2>Heads Up</h2><ul>';
+        html += '<div class="results-section mt-md"><h2>Heads Up</h2><ul>';
         result.warnings.forEach(w => {
-            html += `<li style="color: var(--warning);">${escapeHtml(w)}</li>`;
+            html += `<li class="text-warning">${escapeHtml(w)}</li>`;
         });
         html += '</ul></div>';
     }
@@ -526,27 +519,27 @@ function renderBoardResult(result) {
     if (result.cascade.length) {
         html += '<div class="results-section"><h2>Cascade Steps</h2>';
         result.cascade.forEach(step => {
-            html += `<div class="rules-result" style="margin-bottom: 0.75rem;">`;
+            html += `<div class="rules-result mb-sm">`;
             html += `<span class="rule-number">Step ${step.step_number}</span>`;
             html += `<strong>${escapeHtml(step.event.event_type)}</strong>`;
             if (step.event.source_card) {
                 html += ` (${escapeHtml(step.event.source_card)})`;
             }
             if (step.triggers_fired.length) {
-                html += `<div style="margin-top: 0.5rem; padding-left: 1rem; border-left: 2px solid var(--accent);">`;
+                html += `<div class="cascade-triggers">`;
                 step.triggers_fired.forEach(t => {
-                    html += `<div style="margin-bottom: 0.25rem;">
+                    html += `<div class="cascade-trigger-item">
                         <strong>${escapeHtml(t.permanent_name)}</strong>
-                        <span style="color: var(--text-muted);">(${escapeHtml(t.controller)})</span>:
+                        <span class="text-muted">(${escapeHtml(t.controller)})</span>:
                         ${escapeHtml(t.trigger_text)}
                     </div>`;
                 });
                 html += '</div>';
             }
             if (step.replacements_applied.length) {
-                html += `<div style="margin-top: 0.5rem; padding-left: 1rem; border-left: 2px solid var(--warning);">`;
+                html += `<div class="cascade-replacements">`;
                 step.replacements_applied.forEach(r => {
-                    html += `<div style="margin-bottom: 0.25rem;">
+                    html += `<div class="cascade-replacement-item">
                         <strong>${escapeHtml(r.permanent_name)}</strong> replaces:
                         ${escapeHtml(r.replacement_text)}
                     </div>`;
@@ -554,7 +547,7 @@ function renderBoardResult(result) {
                 html += '</div>';
             }
             if (step.notes.length) {
-                html += '<ul style="margin-top: 0.5rem; padding-left: 1.5rem; list-style: disc;">';
+                html += '<ul class="cascade-notes">';
                 step.notes.forEach(n => { html += `<li>${escapeHtml(n)}</li>`; });
                 html += '</ul>';
             }
@@ -567,7 +560,7 @@ function renderBoardResult(result) {
     if (result.warnings.length) {
         html += '<div class="results-section"><h2>Warnings</h2><ul>';
         result.warnings.forEach(w => {
-            html += `<li style="color: var(--warning);">${escapeHtml(w)}</li>`;
+            html += `<li class="text-warning">${escapeHtml(w)}</li>`;
         });
         html += '</ul></div>';
     }
@@ -670,8 +663,8 @@ function formatMarkdown(text) {
     let html = escapeHtml(text);
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-    html = html.replace(/`(.+?)`/g, '<code style="background:rgba(255,255,255,0.1);padding:0.1rem 0.3rem;border-radius:3px;">$1</code>');
-    html = html.replace(/^- (.+)$/gm, '<li style="margin-left:1rem;">$1</li>');
+    html = html.replace(/`(.+?)`/g, '<code>$1</code>');
+    html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
     return html;
 }
 
@@ -727,6 +720,11 @@ function refreshSavesList() {
         }).join('');
 }
 
+// Wire up save/load/delete buttons
+document.getElementById('save-board-btn').addEventListener('click', saveBoardState);
+document.getElementById('load-board-btn').addEventListener('click', loadBoardState);
+document.getElementById('delete-board-btn').addEventListener('click', deleteBoardState);
+
 // --- Combat Simulator ---
 
 const combatState = {
@@ -761,47 +759,35 @@ function removeCombatBlocker(attackerIdx, blockerIdx) {
 function renderCombatAssignments() {
     const container = document.getElementById('combat-assignments');
     container.innerHTML = combatState.assignments.map((a, ai) => `
-        <div class="results-section" style="margin-bottom: 1rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <h3 style="margin: 0; font-size: 0.95rem;">Attacker ${ai + 1}</h3>
-                <button onclick="removeCombatAttacker(${ai})"
-                        style="background: transparent; color: var(--accent); font-size: 0.8rem; padding: 0.25rem 0.5rem;">
-                    Remove
-                </button>
+        <div class="results-section mb-md">
+            <div class="attacker-header">
+                <h3 class="attacker-title">Attacker ${ai + 1}</h3>
+                <button class="btn-ghost" onclick="removeCombatAttacker(${ai})">Remove</button>
             </div>
-            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
-                <input type="text" class="combat-attacker-name" data-idx="${ai}"
-                       value="${escapeHtml(a.attacker.card_name)}" placeholder="Card name"
-                       style="flex: 1; min-width: 150px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
-                <input type="number" class="combat-attacker-power" data-idx="${ai}"
-                       value="${a.attacker.power ?? ''}" placeholder="P"
-                       style="width: 50px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text); text-align: center;">
-                <input type="number" class="combat-attacker-toughness" data-idx="${ai}"
-                       value="${a.attacker.toughness ?? ''}" placeholder="T"
-                       style="width: 50px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text); text-align: center;">
-                <input type="text" class="combat-attacker-controller" data-idx="${ai}"
-                       value="${escapeHtml(a.attacker.controller)}" placeholder="Controller"
-                       style="width: 100px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
+            <div class="attacker-row">
+                <input type="text" class="combat-attacker-name form-input flex-1 min-w-md" data-idx="${ai}"
+                       value="${escapeHtml(a.attacker.card_name)}" placeholder="Card name">
+                <input type="number" class="combat-attacker-power form-input input-w-stat-lg" data-idx="${ai}"
+                       value="${a.attacker.power ?? ''}" placeholder="P">
+                <input type="number" class="combat-attacker-toughness form-input input-w-stat-lg" data-idx="${ai}"
+                       value="${a.attacker.toughness ?? ''}" placeholder="T">
+                <input type="text" class="combat-attacker-controller form-input input-w-sm" data-idx="${ai}"
+                       value="${escapeHtml(a.attacker.controller)}" placeholder="Controller">
             </div>
-            <div style="padding-left: 1.5rem; margin-top: 0.5rem; border-left: 2px solid var(--border);">
-                <span style="color: var(--text-muted); font-size: 0.8rem;">Blockers:</span>
+            <div class="blockers-area">
+                <span class="blockers-label">Blockers:</span>
                 ${a.blockers.map((b, bi) => `
-                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; align-items: center;">
-                        <input type="text" class="combat-blocker-name" data-ai="${ai}" data-bi="${bi}"
-                               value="${escapeHtml(b.card_name)}" placeholder="Blocker name"
-                               style="flex: 1; min-width: 120px; padding: 0.4rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 0.9rem;">
-                        <input type="number" class="combat-blocker-power" data-ai="${ai}" data-bi="${bi}"
-                               value="${b.power ?? ''}" placeholder="P"
-                               style="width: 45px; padding: 0.4rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text); text-align: center; font-size: 0.9rem;">
-                        <input type="number" class="combat-blocker-toughness" data-ai="${ai}" data-bi="${bi}"
-                               value="${b.toughness ?? ''}" placeholder="T"
-                               style="width: 45px; padding: 0.4rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text); text-align: center; font-size: 0.9rem;">
-                        <button onclick="removeCombatBlocker(${ai}, ${bi})"
-                                style="background: transparent; color: var(--accent); font-size: 0.8rem; padding: 0.2rem 0.5rem;">x</button>
+                    <div class="blocker-row">
+                        <input type="text" class="combat-blocker-name form-input-sm flex-1 min-w-sm" data-ai="${ai}" data-bi="${bi}"
+                               value="${escapeHtml(b.card_name)}" placeholder="Blocker name">
+                        <input type="number" class="combat-blocker-power form-input-sm input-w-stat" data-ai="${ai}" data-bi="${bi}"
+                               value="${b.power ?? ''}" placeholder="P">
+                        <input type="number" class="combat-blocker-toughness form-input-sm input-w-stat" data-ai="${ai}" data-bi="${bi}"
+                               value="${b.toughness ?? ''}" placeholder="T">
+                        <button class="btn-remove" onclick="removeCombatBlocker(${ai}, ${bi})">x</button>
                     </div>
                 `).join('')}
-                <button onclick="addCombatBlocker(${ai})"
-                        style="margin-top: 0.5rem; font-size: 0.8rem; padding: 0.3rem 0.75rem;">+ Blocker</button>
+                <button class="btn-xs mt-sm" onclick="addCombatBlocker(${ai})">+ Blocker</button>
             </div>
         </div>
     `).join('');
@@ -894,7 +880,7 @@ function renderCombatResult(result) {
 
     // Life gained
     if (Object.keys(result.life_gained).length) {
-        html += '<div class="summary-box" style="border-left: 3px solid #4caf50;">';
+        html += '<div class="summary-box combat-damage-box">';
         for (const [player, life] of Object.entries(result.life_gained)) {
             html += `<strong>${escapeHtml(player)}</strong> gains <strong>${life} life</strong> (lifelink)<br>`;
         }
@@ -903,7 +889,7 @@ function renderCombatResult(result) {
 
     // Creatures that die
     if (result.creatures_that_die.length) {
-        html += '<div class="results-section"><h2 style="color: var(--accent);">Creatures That Die</h2><ul>';
+        html += '<div class="results-section"><h2>Creatures That Die</h2><ul>';
         result.creatures_that_die.forEach(c => {
             html += `<li><strong>${escapeHtml(c)}</strong></li>`;
         });
@@ -915,11 +901,11 @@ function renderCombatResult(result) {
         html += '<div class="results-section"><h2>Step-by-Step</h2>';
         result.notes.forEach(note => {
             if (note.endsWith(':')) {
-                html += `<div style="margin-top: 0.75rem; font-weight: bold; color: var(--accent);">${escapeHtml(note)}</div>`;
+                html += `<div class="combat-note-header">${escapeHtml(note)}</div>`;
             } else if (note.startsWith('  *')) {
-                html += `<div style="padding-left: 1rem; color: var(--warning);">${escapeHtml(note)}</div>`;
+                html += `<div class="combat-note-keyword">${escapeHtml(note)}</div>`;
             } else {
-                html += `<div style="padding-left: 1rem;">${escapeHtml(note)}</div>`;
+                html += `<div class="combat-note-default">${escapeHtml(note)}</div>`;
             }
         });
         html += '</div>';
@@ -929,13 +915,17 @@ function renderCombatResult(result) {
     if (result.warnings.length) {
         html += '<div class="results-section"><h2>Warnings</h2><ul>';
         result.warnings.forEach(w => {
-            html += `<li style="color: var(--warning);">${escapeHtml(w)}</li>`;
+            html += `<li class="text-warning">${escapeHtml(w)}</li>`;
         });
         html += '</ul></div>';
     }
 
     document.getElementById('combat-results').innerHTML = html;
 }
+
+// Wire up combat buttons
+document.getElementById('add-attacker-btn').addEventListener('click', addCombatAttacker);
+document.getElementById('run-combat-btn').addEventListener('click', runCombat);
 
 // --- Init ---
 renderCardTags();

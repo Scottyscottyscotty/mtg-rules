@@ -38,7 +38,7 @@
                             card data to give you an accurate answer.
                             <br><br>
                             Try things like:
-                            <ul style="margin: 0.5rem 0 0 1rem;">
+                            <ul class="chat-welcome-list">
                                 <li>"What does poison do?"</li>
                                 <li>"Can two legendary creatures with the same name be on the board?"</li>
                                 <li>"How does 'Rhystic Study' interact with 'Notion Thief'?"</li>
@@ -60,21 +60,19 @@
         <div id="board" class="panel">
             <div class="interaction-input">
                 <h2>Board State Analyzer</h2>
-                <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;">
+                <p class="panel-desc">
                     Build the board state for each player, then trigger an event to see the
                     full cascade: what triggers fire, in what order (APNAP), what they cause,
                     and how replacement effects and static abilities modify everything.
                 </p>
 
                 <!-- Player management -->
-                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
+                <div class="form-row">
                     <input type="text" id="player-name-input" placeholder="Player name"
-                           style="width: 200px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
+                           class="form-input input-w-lg">
                     <button id="add-player-btn">Add Player</button>
-                    <span style="color: var(--text-muted); font-size: 0.85rem; margin-left: 0.5rem;">
-                        Active player:
-                    </span>
-                    <select id="active-player-select" class="format-select" style="min-width: 120px;">
+                    <span class="text-muted-sm ml-sm">Active player:</span>
+                    <select id="active-player-select" class="format-select min-w-sm">
                         <option value="">-- select --</option>
                     </select>
                 </div>
@@ -82,10 +80,10 @@
                 <div id="players-container"></div>
 
                 <!-- Event trigger -->
-                <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);">
-                    <h3 style="margin-bottom: 0.75rem; font-size: 1rem;">Trigger an Event</h3>
-                    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
-                        <select id="event-type-select" class="format-select" style="min-width: 160px;">
+                <div class="section-separator">
+                    <h3 class="section-title">Trigger an Event</h3>
+                    <div class="form-row-wrap">
+                        <select id="event-type-select" class="format-select min-w-lg">
                             <option value="cast_spell">Cast Spell</option>
                             <option value="enters_battlefield">Enters Battlefield</option>
                             <option value="dies">Dies</option>
@@ -104,12 +102,12 @@
                             <option value="end_step">End Step</option>
                         </select>
                         <input type="text" id="event-source-card" placeholder="Source card (optional)"
-                               style="width: 180px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
-                        <select id="event-source-player" class="format-select" style="min-width: 120px;">
+                               class="form-input input-w-xl">
+                        <select id="event-source-player" class="format-select min-w-sm">
                             <option value="">Source player</option>
                         </select>
                         <input type="text" id="event-details" placeholder="Details (e.g. 'creature spell')"
-                               style="width: 200px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
+                               class="form-input input-w-lg">
                         <button id="run-event-btn" disabled>Analyze Event</button>
                     </div>
                 </div>
@@ -118,16 +116,15 @@
             <div id="board-results"></div>
 
             <!-- Save / Load board state -->
-            <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);
-                        display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+            <div class="section-separator save-load-bar">
                 <input type="text" id="save-name-input" placeholder="Save name (e.g. 'EDH game 1')"
-                       style="width: 200px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
-                <button onclick="saveBoardState()">Save Board</button>
-                <select id="load-select" class="format-select" style="min-width: 160px;">
+                       class="form-input input-w-lg">
+                <button id="save-board-btn">Save Board</button>
+                <select id="load-select" class="format-select min-w-lg">
                     <option value="">-- Load saved --</option>
                 </select>
-                <button onclick="loadBoardState()">Load</button>
-                <button onclick="deleteBoardState()" style="background: transparent; color: var(--accent); font-size: 0.85rem;">Delete</button>
+                <button id="load-board-btn">Load</button>
+                <button id="delete-board-btn" class="btn-ghost-sm">Delete</button>
             </div>
         </div>
 
@@ -135,24 +132,24 @@
         <div id="combat" class="panel">
             <div class="interaction-input">
                 <h2>Combat Simulator</h2>
-                <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;">
+                <p class="panel-desc">
                     Set up attackers and blockers to simulate combat damage. The engine handles
                     first strike, double strike, trample, deathtouch, lifelink, flying, and more.
                     All damage math is deterministic — no AI needed.
                 </p>
 
-                <div style="margin-bottom: 1rem;">
-                    <label style="color: var(--text-muted); font-size: 0.85rem;">Defending player:</label>
+                <div class="mb-md">
+                    <label class="text-muted-sm">Defending player:</label>
                     <input type="text" id="combat-defending-player" placeholder="Player name"
                            value="Opponent"
-                           style="width: 150px; padding: 0.5rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
+                           class="form-input input-w-md">
                 </div>
 
                 <div id="combat-assignments"></div>
 
-                <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
-                    <button onclick="addCombatAttacker()">+ Add Attacker</button>
-                    <button id="run-combat-btn" onclick="runCombat()">Simulate Combat</button>
+                <div class="combat-btn-row">
+                    <button id="add-attacker-btn">+ Add Attacker</button>
+                    <button id="run-combat-btn">Simulate Combat</button>
                 </div>
             </div>
 
@@ -163,7 +160,7 @@
         <div id="interactions" class="panel">
             <div class="interaction-input">
                 <h2>Analyze Card Interactions</h2>
-                <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;">
+                <p class="panel-desc">
                     Add 2-6 cards to see how they interact: stack behavior, layer effects,
                     replacement effects, keyword combos, and relevant rulings.
                 </p>
@@ -173,7 +170,7 @@
                     <button id="add-card-btn">Add</button>
                 </div>
                 <div id="card-tags" class="card-tags"></div>
-                <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;">
+                <div class="form-row mt-sm">
                     <select id="format-select" class="format-select">
                         <option value="all">All Formats</option>
                         <option value="standard">Standard</option>
