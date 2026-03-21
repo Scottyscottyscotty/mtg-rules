@@ -835,7 +835,7 @@ def _is_affected_by(
     if "other creatures" in affects:
         return perm.card_name != source_card
 
-    return True
+    return False
 
 
 # ---------------------------------------------------------------------------

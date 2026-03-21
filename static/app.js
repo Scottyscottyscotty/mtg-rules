@@ -68,13 +68,24 @@ function setupAutocomplete(input, onSelect) {
         }
     });
 
-    // Close dropdown on outside click
-    document.addEventListener('click', e => {
-        if (!wrapper.contains(e.target)) {
-            dropdown.innerHTML = '';
-            dropdown.classList.remove('visible');
-        }
-    });
+    // Close dropdown on outside click — use a single shared listener
+    if (!setupAutocomplete._globalListener) {
+        setupAutocomplete._wrappers = new Set();
+        setupAutocomplete._globalListener = true;
+        document.addEventListener('click', e => {
+            for (const w of setupAutocomplete._wrappers) {
+                if (!w.isConnected) {
+                    setupAutocomplete._wrappers.delete(w);
+                    continue;
+                }
+                if (!w.contains(e.target)) {
+                    const dd = w.querySelector('.ac-dropdown');
+                    if (dd) { dd.innerHTML = ''; dd.classList.remove('visible'); }
+                }
+            }
+        });
+    }
+    setupAutocomplete._wrappers.add(wrapper);
 
     return wrapper;
 }
@@ -740,6 +751,7 @@ function addCombatAttacker() {
 }
 
 function removeCombatAttacker(idx) {
+    collectCombatState();
     combatState.assignments.splice(idx, 1);
     renderCombatAssignments();
 }

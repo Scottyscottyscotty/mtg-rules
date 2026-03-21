@@ -135,7 +135,20 @@ def validate_phase1(
         name = t.get("permanent_name", "")
         oracle = oracle_lookup.get(name.lower(), "")
 
-        if oracle and not has_triggered_ability(oracle):
+        if not oracle:
+            # No oracle text found — card may be missing from Scryfall or
+            # may be a land/token with empty text. Skip unverifiable claims.
+            logger.warning(
+                "Validation: '%s' claimed as trigger but has no oracle text "
+                "available — dropping unverifiable trigger", name,
+            )
+            warnings.append(
+                f"'{name}' was listed as triggering but has no oracle text "
+                f"available for verification. It was removed from triggers."
+            )
+            continue
+
+        if not has_triggered_ability(oracle):
             # Claude says it triggers, but oracle text has no trigger clause.
             # This might be a replacement effect or static ability misclassified.
             logger.warning(

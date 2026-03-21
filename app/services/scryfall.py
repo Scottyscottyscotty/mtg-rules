@@ -71,8 +71,11 @@ async def fetch_card(name: str) -> Card | None:
     """Fetch a card by name from Scryfall, with local file caching."""
     cached = _cache_path(name)
     if cached.exists():
-        data = json.loads(cached.read_text())
-        return _parse_card(data)
+        try:
+            data = json.loads(cached.read_text())
+            return _parse_card(data)
+        except (json.JSONDecodeError, KeyError):
+            cached.unlink(missing_ok=True)
 
     async with httpx.AsyncClient() as client:
         # Scryfall asks for 50-100ms between requests
